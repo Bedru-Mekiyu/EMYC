@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: emyc_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: competition_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emyc_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgrespassword@db:5432/competition_db"
+      DATABASE_SYNC_URL: "postgresql://postgres:postgrespassword@db:5432/competition_db"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      BOT_MODE: "${BOT_MODE:-polling}"
+      WEBHOOK_URL: "${WEBHOOK_URL:-}"
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET:-}"
+      ADMIN_TELEGRAM_IDS: "${ADMIN_TELEGRAM_IDS:-}"
+      DEFAULT_LANGUAGE: "en"
+      DEBUG: "false"
+      ENVIRONMENT: "production"
+
+volumes:
+  postgres_data:
