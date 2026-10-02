@@ -49,14 +49,15 @@ def test_multilingual_welcome_branding_and_greeting():
         assert expected_greeting in text
         assert expected_brand in text
 
-        # Verify main keyboard buttons
+        # Verify main keyboard buttons: strictly 3 vertical buttons
         kb = get_main_menu_keyboard(lang)
-        assert len(kb.inline_keyboard) == 2
-        # Row 1: Start button
+        assert len(kb.inline_keyboard) == 3
+        # Row 1: Start Competition button
         assert "▶️" in kb.inline_keyboard[0][0].text
-        # Row 2: Language & Help
+        # Row 2: Change Language
         assert "🌐" in kb.inline_keyboard[1][0].text
-        assert "❓" in kb.inline_keyboard[1][1].text
+        # Row 3: Help
+        assert "❓" in kb.inline_keyboard[2][0].text
 
 
 def test_keyboard_layouts():
@@ -65,7 +66,7 @@ def test_keyboard_layouts():
     attempt_id = uuid.uuid4()
     q_id = uuid.uuid4()
 
-    # 1. Question keyboard with 4 choices + navigation
+    # 1. Question keyboard with 4 choices + navigation and Finish Examination
     q_kb = get_question_keyboard(attempt_id, q_id, 1, 5, selected_opt="B", lang="en")
     assert len(q_kb.inline_keyboard) == 2
     opts_row = q_kb.inline_keyboard[0]
@@ -75,10 +76,11 @@ def test_keyboard_layouts():
     assert opts_row[2].text == "C"
     assert opts_row[3].text == "D"
     assert "Next Question" in q_kb.inline_keyboard[1][0].text
+    assert "Finish Examination" in q_kb.inline_keyboard[1][1].text
 
-    # 2. Final question shows Submit button
+    # 2. Final question shows Finish Examination button
     q_final_kb = get_question_keyboard(attempt_id, q_id, 5, 5, selected_opt="D", lang="en")
-    assert "Submit Exam" in q_final_kb.inline_keyboard[1][0].text
+    assert any("Finish Examination" in btn.text for row in q_final_kb.inline_keyboard for btn in row)
 
     # 3. Results keyboard segregated buttons
     res_kb = get_results_keyboard(comp_id, correct_count=8, incorrect_count=2, lang="en")
@@ -135,7 +137,19 @@ async def test_membership_verification_flow(db_session: AsyncSession):
     assert "EMYC Membership Verification" in prompt_text
     assert "EMYC/4055828/2026" in prompt_text
 
-    # 2. User submits valid membership ID
+    # 2. User submits invalid membership ID format -> gives helpful error
+    update_msg_invalid = MagicMock(spec=Update)
+    update_msg_invalid.effective_user = user
+    msg_inv = MagicMock()
+    msg_inv.text = "INVALID_ID_123"
+    msg_inv.reply_text = AsyncMock()
+    update_msg_invalid.message = msg_inv
+
+    await handle_text_message(update_msg_invalid, context)
+    msg_inv.reply_text.assert_called_once()
+    assert "Invalid Membership ID format" in msg_inv.reply_text.call_args[0][0]
+
+    # 3. User submits valid membership ID
     update_msg = MagicMock(spec=Update)
     update_msg.effective_user = user
     msg = MagicMock()

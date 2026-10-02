@@ -25,7 +25,12 @@ MESSAGES = {
         "መታወቂያዎን በቀጥታ በዚህ ውይይት ይላኩ:"
     ),
     "membership_invalid_format": "❌ ልክ ያልሆነ የአባልነት መታወቂያ ቅርጸት። ምሳሌ: `EMYC/4055828/2026`",
-    "membership_not_found": "❌ ይህ የአባልነት መታወቂያ በኢ.ሙ.ወ.ም አባላት መዝገብ ውስጥ አልተገኘም።",
+    "membership_not_found": (
+        "❌ ይህ የአባልነት መታወቂያ በኢ.ሙ.ወ.ም መዝገብ ውስጥ አልተገኘም።\n\n"
+        "እስካሁን የኢትዮጵያ ሙስሊም ወጣቶች ማህበር (ኢ.ሙ.ወ.ም) አባል ካልሆኑ፣ "
+        "እባክዎ በይፋዊው የኢ.ሙ.ወ.ም የምዝገባ ሥርዓት ወይም በአቅራቢያዎ በሚገኝ የኢ.ሙ.ወ.ም "
+        "ቅርንጫፍ በኩል አባልነትዎን ያረጋግጡ።"
+    ),
     "membership_already_bound": "❌ ይህ የአባልነት መታወቂያ ከሌላ ቴሌግራም አካውንት ጋር ተያይዟል።",
     "membership_verified": (
         "✅ *አባልነትዎ ተረጋግጧል!*\n\n"
@@ -49,6 +54,7 @@ MESSAGES = {
     "already_submitted": "✅ ፈተናዎን አስቀድመው ጨርሰው አስገብተዋል።",
     "question_header": "*ጥያቄ {current} / {total}*\n⏱ *ቀሪ ሰዓት:* {time_left}",
     "time_up_auto_submit": "⏰ *ጊዜው አልቋል።*\nመልስዎ በራስ-ሰር ተልኳል።",
+    "finish_exam_btn": "🏁 ፈተናውን ጨርስ",
     "exam_submitted": (
         "⏳ *ፈተናው ተጠናቋል*\n\n"
         "ስለተሳተፉ እናመሰግናለን! መልስዎ በተሳካ ሁኔታ ገብቷል።\n"
@@ -66,7 +72,7 @@ MESSAGES = {
     "view_result_btn": "📊 ውጤት ይመልከቱ",
     "view_correct_btn": "✅ ትክክለኛ መልሶች ({count})",
     "view_incorrect_btn": "❌ የተሳሳቱ መልሶች ({count})",
-    "back_to_menu_btn": "🏠 ዋና ገጽ",
+    "back_to_menu_btn": "🔙 ዋና ገጽ",
     "back_btn": "🔙 ተመለስ",
     "next_question_btn": "⏭ የሚቀጥለው ጥያቄ",
     "submit_exam_btn": "🏁 ፈተናውን ጨርስ",

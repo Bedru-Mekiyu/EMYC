@@ -25,7 +25,12 @@ MESSAGES = {
         "Eenyummeessaa keessan kallattiin asitti ergaa:"
     ),
     "membership_invalid_format": "❌ Bocni Eenyummeessaa Miseensummaa sirrii miti. Fakkeenya: `EMYC/4055828/2026`",
-    "membership_not_found": "❌ Eenyummeessaan miseensummaa kun galmee miseensota EMYC keessatti hin argamne.",
+    "membership_not_found": (
+        "❌ Eenyummeessaan miseensummaa kun galmee EMYC keessatti hin argamne.\n\n"
+        "Hanga ammaatti miseensa Waldaa Dargaggoota Muslimoota Itoophiyaa (EMYC) hin taane yoo taatan, "
+        "mee dura karaa sirna galmee miseensummaa EMYC seera qabeessaa yookiin damee EMYC dhiyoo jiruun "
+        "miseensummaa keessan mirkaneeffadhaa."
+    ),
     "membership_already_bound": "❌ Eenyummeessaan miseensummaa kun akkaawuntii Telegiraamaa biraatti hidhameera.",
     "membership_verified": (
         "✅ *Miseensummaan Mirkanaa'eera!*\n\n"
@@ -49,6 +54,7 @@ MESSAGES = {
     "already_submitted": "✅ Qormaata keessan duraan xumurtanii galchitanii jirtu.",
     "question_header": "*Gaaffii {current} / {total}*\n⏱ *Yeroo hafe:* {time_left}",
     "time_up_auto_submit": "⏰ *Yeroon dhumateera.*\nQormaatni keessan ofumaan ergameera.",
+    "finish_exam_btn": "🏁 Qormaata Xumuri",
     "exam_submitted": (
         "⏳ *Qormaanni Xumurameera*\n\n"
         "Hirmaannaa keessaniif galatoomaa! Deebiin keessan ergameera.\n"
@@ -66,7 +72,7 @@ MESSAGES = {
     "view_result_btn": "📊 Firii Ilaali",
     "view_correct_btn": "✅ Deebii Sirrii ({count})",
     "view_incorrect_btn": "❌ Deebii Dogoggoraa ({count})",
-    "back_to_menu_btn": "🏠 Fuula Duraa",
+    "back_to_menu_btn": "🔙 Fuula Duraa",
     "back_btn": "🔙 Duubatti",
     "next_question_btn": "⏭ Gaaffii Itti Aanu",
     "submit_exam_btn": "🏁 Qormaata Xumuri",

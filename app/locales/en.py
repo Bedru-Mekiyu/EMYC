@@ -25,7 +25,12 @@ MESSAGES = {
         "Send your ID directly in this chat:"
     ),
     "membership_invalid_format": "❌ Invalid Membership ID format. Example: `EMYC/4055828/2026`",
-    "membership_not_found": "❌ Membership ID could not be verified in the EMYC membership database.",
+    "membership_not_found": (
+        "❌ Membership ID could not be found.\n\n"
+        "If you do not have an EMYC Membership ID yet, please register through the official "
+        "Ethiopian Muslim Youth Council membership registration system or contact your local "
+        "EMYC representative before attempting the examination."
+    ),
     "membership_already_bound": "❌ This Membership ID is already bound to another Telegram account.",
     "membership_verified": (
         "✅ *Membership Verified!*\n\n"
@@ -49,6 +54,7 @@ MESSAGES = {
     "already_submitted": "✅ You have already completed and submitted your exam.",
     "question_header": "*Question {current} / {total}*\n⏱ *Time remaining:* {time_left}",
     "time_up_auto_submit": "⏰ *Time is up.*\nYour examination has been submitted automatically.",
+    "finish_exam_btn": "🏁 Finish Examination",
     "exam_submitted": (
         "⏳ *Examination Completed*\n\n"
         "Thank you for participating! Your answers have been submitted.\n"
@@ -66,7 +72,7 @@ MESSAGES = {
     "view_result_btn": "📊 View Result",
     "view_correct_btn": "✅ Correct Answers ({count})",
     "view_incorrect_btn": "❌ Incorrect Answers ({count})",
-    "back_to_menu_btn": "🏠 Main Menu",
+    "back_to_menu_btn": "🔙 Main Menu",
     "back_btn": "🔙 Back",
     "next_question_btn": "⏭ Next Question",
     "submit_exam_btn": "🏁 Submit Exam",

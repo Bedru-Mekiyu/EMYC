@@ -5,13 +5,15 @@ from app.locales.translator import get_text
 
 
 def get_main_menu_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Participant main menu keyboard: 3 essential buttons."""
+    """Participant main menu keyboard strictly providing:
+    1. ▶️ Start Competition
+    2. 🌐 Change Language
+    3. ❓ Help
+    """
     keyboard = [
         [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
-        [
-            InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang"),
-            InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help"),
-        ],
+        [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
+        [InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -49,26 +51,25 @@ def get_question_keyboard(
     selected_opt: Optional[str] = None,
     lang: str = "en",
 ) -> InlineKeyboardMarkup:
-    """Question answer choices and progression buttons."""
-    # 4 Option buttons: A, B, C, D
+    """Question answer choices: A, B, C, D and Finish Examination."""
     buttons = []
     for opt in ["A", "B", "C", "D"]:
         label = f"🔘 {opt}" if selected_opt == opt else opt
-        # Callback payload: ans:<attempt_id>:<question_id>:<opt>:<display_order>
         cb_data = f"ans:{attempt_id}:{question_id}:{opt}:{display_order}"
         buttons.append(InlineKeyboardButton(label, callback_data=cb_data))
 
     keyboard = [buttons]
 
-    # Navigation or Final Submission row
+    # Action row: Navigation if questions remain + Finish Examination
+    action_row = []
     if display_order < total_questions:
-        nav_label = get_text("next_question_btn", lang)
-        nav_btn = InlineKeyboardButton(nav_label, callback_data=f"q:nav:{attempt_id}:{display_order + 1}")
-        keyboard.append([nav_btn])
-    else:
-        submit_label = get_text("submit_exam_btn", lang)
-        submit_btn = InlineKeyboardButton(submit_label, callback_data=f"exam:submit:{attempt_id}")
-        keyboard.append([submit_btn])
+        action_row.append(
+            InlineKeyboardButton(get_text("next_question_btn", lang), callback_data=f"q:nav:{attempt_id}:{display_order + 1}")
+        )
+    action_row.append(
+        InlineKeyboardButton(get_text("finish_exam_btn", lang), callback_data=f"exam:submit:{attempt_id}")
+    )
+    keyboard.append(action_row)
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -76,7 +77,11 @@ def get_question_keyboard(
 def get_results_keyboard(
     competition_id: uuid.UUID, correct_count: int, incorrect_count: int, lang: str = "en"
 ) -> InlineKeyboardMarkup:
-    """Results post-publication keyboard with segregated answer review options."""
+    """Results post-publication keyboard with segregated answer review options:
+    - ✅ Correct Answers
+    - ❌ Incorrect Answers
+    - 🔙 Main Menu
+    """
     keyboard = [
         [
             InlineKeyboardButton(
@@ -96,7 +101,10 @@ def get_results_keyboard(
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Main administrative control panel keyboard."""
+    """Main administrative control panel keyboard:
+    - Status & Results
+    - Announcement & Competition
+    """
     keyboard = [
         [
             InlineKeyboardButton(get_text("admin_btn_status", lang), callback_data="admin:status"),
