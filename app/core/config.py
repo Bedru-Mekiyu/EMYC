@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Database (Supabase PostgreSQL / asyncpg)
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/competition_db"
     DATABASE_SYNC_URL: Optional[str] = None
+    TEST_DATABASE_URL: str = "postgresql+asyncpg://postgres@localhost:5433/competition_test_db"
+
+    # Competition Policies
+    MANUAL_EARLY_CLOSURE_POLICY: Literal["truncate_to_close_time", "allow_in_progress_to_finish"] = "truncate_to_close_time"
 
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: str = "mock_token_for_tests"
@@ -59,3 +63,6 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+settings = get_settings()

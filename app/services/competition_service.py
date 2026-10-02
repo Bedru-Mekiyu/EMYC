@@ -17,6 +17,7 @@ from app.models.attempt import (
 )
 from app.core.logging import logger, log_audit_event
 from app.core.time_utils import now_utc, ensure_utc
+from app.core.config import settings
 
 
 # Valid state machine transitions
@@ -35,7 +36,18 @@ class CompetitionError(Exception):
     pass
 
 
+class CompetitionValidationError(CompetitionError):
+    """Raised when competition fails pre-activation validation."""
+    def __init__(self, message: str, errors: Optional[List[str]] = None):
+        super().__init__(message)
+        self.errors = errors or []
+
+
 class CompetitionNotOpenError(CompetitionError):
+    pass
+
+
+class CompetitionClosedError(CompetitionError):
     pass
 
 
@@ -83,10 +95,93 @@ class CompetitionService:
         return competition
 
     @staticmethod
+    async def validate_competition_for_live(db: AsyncSession, comp: Competition) -> None:
+        """Strict pre-activation validation for competitions transitioning to LIVE status.
+        
+        Guarantees that a competition cannot go LIVE unless questions, schedule,
+        and options are completely valid and verified.
+        """
+        errors = []
+
+        # 1. Schedule checks
+        if not comp.opens_at:
+            errors.append("Competition opens_at is missing")
+        if not comp.closes_at:
+            errors.append("Competition closes_at is missing")
+        if comp.opens_at and comp.closes_at:
+            opens_utc = ensure_utc(comp.opens_at)
+            closes_utc = ensure_utc(comp.closes_at)
+            if opens_utc >= closes_utc:
+                errors.append(f"opens_at ({opens_utc}) must be strictly earlier than closes_at ({closes_utc})")
+
+        # 2. Duration and question count
+        if (comp.duration_minutes or 0) <= 0:
+            errors.append(f"duration_minutes must be > 0, got {comp.duration_minutes}")
+        if (comp.question_count or 0) <= 0:
+            errors.append(f"question_count must be > 0, got {comp.question_count}")
+
+        # 3. Status checks
+        if comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED]:
+            errors.append(f"Cannot activate competition that is already {comp.status}")
+
+        # 4. Fetch questions from database
+        q_stmt = (
+            select(CompetitionQuestion)
+            .where(CompetitionQuestion.competition_id == comp.id)
+            .order_by(CompetitionQuestion.order_index)
+        )
+        q_res = await db.execute(q_stmt)
+        questions = list(q_res.scalars().all())
+
+        if len(questions) != comp.question_count:
+            errors.append(
+                f"Question count mismatch: configured {comp.question_count} questions, but found {len(questions)} in database"
+            )
+
+        seen_orders = set()
+        required_keys = {"A", "B", "C", "D"}
+
+        for idx, q in enumerate(questions, start=1):
+            # Check question order uniqueness
+            if q.order_index in seen_orders:
+                errors.append(f"Duplicate question order_index {q.order_index} on question '{q.question_text[:30]}'")
+            seen_orders.add(q.order_index)
+
+            # Check question text
+            if not (q.question_text and q.question_text.strip()):
+                errors.append(f"Question #{q.order_index} has empty question_text")
+
+            # Check options: exactly 4 options with non-empty string values
+            if not isinstance(q.options, dict):
+                errors.append(f"Question #{q.order_index} options must be a dictionary")
+            else:
+                if set(q.options.keys()) != required_keys:
+                    errors.append(f"Question #{q.order_index} must have exactly options A, B, C, D (found {set(q.options.keys())})")
+                for key in required_keys:
+                    val = q.options.get(key)
+                    if not (val and str(val).strip()):
+                        errors.append(f"Question #{q.order_index} option {key} is empty")
+
+            # Check correct_option
+            if q.correct_option not in required_keys:
+                errors.append(f"Question #{q.order_index} correct_option '{q.correct_option}' is invalid (must be one of A, B, C, D)")
+
+        if errors:
+            raise CompetitionValidationError(
+                f"Competition cannot go LIVE due to {len(errors)} validation failure(s): {'; '.join(errors)}",
+                errors=errors,
+            )
+
+    @staticmethod
     async def update_status(
-        db: AsyncSession, competition_id: uuid.UUID, new_status: CompetitionStatus, admin_id: str = "admin"
+        db: AsyncSession,
+        competition_id: uuid.UUID,
+        new_status: CompetitionStatus,
+        admin_id: str = "admin",
+        early_closure_policy: Optional[str] = None,
     ) -> Competition:
-        """Transitions competition status following strict lifecycle rules."""
+        """Transitions competition status following strict lifecycle rules and validation."""
+        now = now_utc()
         comp = await db.get(Competition, competition_id)
         if not comp:
             raise CompetitionError("Competition not found")
@@ -96,6 +191,35 @@ class CompetitionService:
             raise CompetitionError(
                 f"Invalid transition from {current_status} to {new_status}"
             )
+
+        # Pre-activation validation
+        if new_status == CompetitionStatus.LIVE:
+            await CompetitionService.validate_competition_for_live(db, comp)
+
+        # Handle manual early closure when transitioning from LIVE to CLOSED before closes_at
+        if current_status == CompetitionStatus.LIVE and new_status == CompetitionStatus.CLOSED:
+            closes_utc = ensure_utc(comp.closes_at)
+            policy = early_closure_policy or getattr(settings, "MANUAL_EARLY_CLOSURE_POLICY", "truncate_to_close_time")
+            is_early_close = now < closes_utc
+
+            if is_early_close and policy == "truncate_to_close_time":
+                # Truncate all in-progress attempts' deadlines to now and auto-submit
+                active_stmt = select(ExamAttempt).where(
+                    and_(
+                        ExamAttempt.competition_id == comp.id,
+                        ExamAttempt.status == AttemptStatus.IN_PROGRESS,
+                    )
+                )
+                res = await db.execute(active_stmt)
+                for att in res.scalars().all():
+                    att.deadline_at = now
+                    await CompetitionService.auto_submit_expired_attempt(db, att)
+
+            log_audit_event("COMPETITION_MANUALLY_CLOSED", "ADMIN", admin_id, {
+                "competition_id": str(competition_id),
+                "is_early_close": is_early_close,
+                "policy": policy,
+            })
 
         comp.status = new_status
         await db.commit()
@@ -108,16 +232,56 @@ class CompetitionService:
         return comp
 
     @staticmethod
+    async def check_and_auto_close_competitions(db: AsyncSession) -> int:
+        """Automatically transitions LIVE competitions to CLOSED when closing time is reached."""
+        now = now_utc()
+        stmt = select(Competition).where(
+            and_(
+                Competition.status == CompetitionStatus.LIVE,
+                Competition.closes_at <= now,
+            )
+        )
+        res = await db.execute(stmt)
+        competitions = list(res.scalars().all())
+
+        closed_count = 0
+        for comp in competitions:
+            comp.status = CompetitionStatus.CLOSED
+            # Sweep remaining active attempts
+            active_stmt = select(ExamAttempt).where(
+                and_(
+                    ExamAttempt.competition_id == comp.id,
+                    ExamAttempt.status == AttemptStatus.IN_PROGRESS,
+                )
+            )
+            act_res = await db.execute(active_stmt)
+            for att in act_res.scalars().all():
+                await CompetitionService.auto_submit_expired_attempt(db, att)
+
+            log_audit_event("COMPETITION_AUTO_CLOSED", "SYSTEM", "backend", {
+                "competition_id": str(comp.id),
+                "closed_at": now.isoformat(),
+            })
+            closed_count += 1
+
+        if closed_count > 0:
+            await db.commit()
+        return closed_count
+
+    @staticmethod
     async def get_active_competition(db: AsyncSession) -> Optional[Competition]:
-        """Returns current LIVE competition within schedule window."""
-        now = datetime.now(timezone.utc)
+        """Returns current LIVE competition within schedule window, executing automatic closure sweep first."""
+        # 1. Check and automatically close any competitions that reached their closes_at time
+        await CompetitionService.check_and_auto_close_competitions(db)
+
+        now = now_utc()
         stmt = (
             select(Competition)
             .where(
                 and_(
                     Competition.status == CompetitionStatus.LIVE,
                     Competition.opens_at <= now,
-                    Competition.closes_at >= now,
+                    Competition.closes_at > now,
                 )
             )
             .order_by(Competition.opens_at.desc())
@@ -171,7 +335,11 @@ class CompetitionService:
             deadline_at=deadline_at,
         )
         db.add(attempt)
-        await db.flush()
+        try:
+            await db.flush()
+        except Exception:
+            await db.rollback()
+            raise DuplicateAttemptError("Participant already has an official attempt for this competition")
 
         # 4. Fetch competition questions
         q_stmt = (
@@ -205,8 +373,13 @@ class CompetitionService:
             )
             db.add(order_entry)
 
-        await db.commit()
-        await db.refresh(attempt)
+        try:
+            await db.commit()
+            await db.refresh(attempt)
+        except Exception:
+            await db.rollback()
+            raise DuplicateAttemptError("Participant already has an official attempt for this competition")
+
         log_audit_event("ATTEMPT_STARTED", "PARTICIPANT", str(participant_id), {
             "attempt_id": str(attempt.id),
             "competition_id": str(competition_id),
@@ -354,13 +527,28 @@ class CompetitionService:
             answered_at=now,
         )
         db.add(answer)
-        await db.commit()
-
-        # NOTE: Do NOT return is_correct to avoid live correctness feedback
-        return {
-            "status": "recorded",
-            "selected_display_option": selected_display_option,
-        }
+        try:
+            await db.commit()
+            return {
+                "status": "recorded",
+                "selected_display_option": selected_display_option,
+            }
+        except Exception:
+            await db.rollback()
+            # Concurrency race handled gracefully: check if answer was recorded by racing task
+            scalar_stmt = (
+                select(ParticipantAnswer.selected_display_option)
+                .where(
+                    ParticipantAnswer.attempt_id == attempt_id,
+                    ParticipantAnswer.question_id == question_id,
+                )
+            )
+            res_retry = await db.execute(scalar_stmt)
+            recorded_opt = res_retry.scalar_one_or_none()
+            return {
+                "status": "already_recorded",
+                "selected_display_option": recorded_opt if recorded_opt is not None else selected_display_option,
+            }
 
     @staticmethod
     async def submit_attempt(db: AsyncSession, attempt_id: uuid.UUID) -> ExamAttempt:

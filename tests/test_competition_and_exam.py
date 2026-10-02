@@ -73,9 +73,22 @@ async def test_competition_lifecycle_transitions(db_session: AsyncSession):
         title="Lifecycle Comp",
         opens_at=now,
         closes_at=now + timedelta(hours=1),
+        duration_minutes=30,
+        question_count=1,
         status=CompetitionStatus.DRAFT,
     )
     assert comp.status == CompetitionStatus.DRAFT
+
+    # Add question to satisfy pre-LIVE validation
+    q = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Lifecycle Q1",
+        options={"A": "1", "B": "2", "C": "3", "D": "4"},
+        correct_option="A",
+        order_index=1,
+    )
+    db_session.add(q)
+    await db_session.commit()
 
     # Valid transitions: DRAFT -> SCHEDULED -> LIVE -> CLOSED -> RESULTS_FINALIZED -> PUBLISHED
     comp = await CompetitionService.update_status(db_session, comp.id, CompetitionStatus.SCHEDULED)
