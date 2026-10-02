@@ -17,8 +17,15 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-# Override sqlalchemy.url with the application configuration
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Support -x db_url=... or environment variable or settings.DATABASE_URL
+x_args = context.get_x_argument(as_dictionary=True)
+db_url = x_args.get("db_url") or settings.DATABASE_URL
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+config.set_main_option("sqlalchemy.url", db_url)
 
 target_metadata = Base.metadata
 

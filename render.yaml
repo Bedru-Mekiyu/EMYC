@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: emyc-competition-platform
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: BOT_MODE
+        value: webhook
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: MEMBERSHIP_ADAPTER_TYPE
+        value: mock
+      - key: MEMBERSHIP_API_URL
+        sync: false
+      - key: MEMBERSHIP_API_KEY
+        sync: false
+      - key: DEFAULT_LANGUAGE
+        value: en

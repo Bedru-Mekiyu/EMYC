@@ -1,5 +1,17 @@
 import pytest
 from httpx import AsyncClient
+from app.core.config import Settings
+
+
+@pytest.mark.asyncio
+async def test_root_health_check(client: AsyncClient):
+    """Verifies that the root /health endpoint responds with 200 OK for Render liveness probes."""
+    response = await client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "project" in data
+    assert "environment" in data
 
 
 @pytest.mark.asyncio
@@ -20,3 +32,15 @@ async def test_readiness_check(client: AsyncClient):
     data = response.json()
     assert data["status"] == "ready"
     assert data["database"] == "healthy"
+
+
+def test_database_url_normalization():
+    """Verifies that Settings automatically normalizes postgres:// and postgresql:// to postgresql+asyncpg://."""
+    s1 = Settings(DATABASE_URL="postgres://user:pass@host:5432/db")
+    assert s1.DATABASE_URL == "postgresql+asyncpg://user:pass@host:5432/db"
+
+    s2 = Settings(DATABASE_URL="postgresql://user:pass@host:5432/db")
+    assert s2.DATABASE_URL == "postgresql+asyncpg://user:pass@host:5432/db"
+
+    s3 = Settings(DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db")
+    assert s3.DATABASE_URL == "postgresql+asyncpg://user:pass@host:5432/db"

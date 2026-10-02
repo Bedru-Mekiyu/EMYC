@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     DEFAULT_LANGUAGE: str = "en"
     SUPPORTED_LANGUAGES: List[str] = ["en", "am", "om", "ar"]
 
+    @field_validator("DATABASE_URL", "TEST_DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_async_db_url(cls, v: Optional[str]) -> Optional[str]:
+        """Automatically normalizes postgresql:// and postgres:// to postgresql+asyncpg:// for Supabase/Render."""
+        if not v or not isinstance(v, str):
+            return v
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     @property
     def admin_ids(self) -> List[int]:
         """Parsed list of admin telegram user IDs."""

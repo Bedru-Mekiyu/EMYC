@@ -199,3 +199,121 @@ pytest -v
 5. **Publishing Results**:
    - Admin reviews the top leaderboard preview and taps **📢 Publish Results**.
    - Notifications are automatically delivered to all participants with a **📊 View Result** button.
+
+---
+
+## 10. Deploy to Render
+
+The platform is fully prepared for a production deployment on **Render** as a single Web Service instance connected to a **Supabase PostgreSQL** database.
+
+### Architectural Blueprint
+
+```
+Telegram Bot API
+       │ (HTTPS POST Webhook)
+       ▼
+Render Web Service (FastAPI / Uvicorn on 0.0.0.0:$PORT)
+       │  ├── GET /health (Liveness Probe)
+       │  ├── POST /api/v1/telegram/webhook (Secret Token Validation)
+       │  └── Background Sweeper (30s interval, SKIP LOCKED)
+       ▼
+Supabase PostgreSQL 16+ (SSL / Transactional Pool)
+```
+
+### 10.1 Prerequisites
+
+1. **Supabase Database**: A PostgreSQL database on [Supabase](https://supabase.com). Copy the connection URI from **Project Settings** -> **Database** -> **Connection string** (URI).
+2. **Telegram Bot Token**: Created via [@BotFather](https://t.me/BotFather).
+3. **Admin User ID**: Your personal numeric Telegram User ID (obtain from [@userinfobot](https://t.me/userinfobot)).
+4. **Render Account**: A free or paid account on [Render](https://render.com).
+
+### 10.2 Deployment via Render Blueprint (`render.yaml`)
+
+1. Connect your GitHub repository to Render.
+2. Select **New** -> **Blueprint**.
+3. Choose the repository containing `render.yaml`.
+4. Render automatically configures:
+   * **Runtime**: Python 3.12+
+   * **Build Command**: `pip install -r requirements.txt && alembic upgrade head`
+   * **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   * **Health Check Path**: `/health`
+5. Fill in the sensitive environment variables in the prompt before deployment.
+
+### 10.3 Manual Service Setup (Alternative)
+
+If setting up manually in the Render Dashboard:
+
+1. **Create Web Service**: Click **New +** -> **Web Service**.
+2. **Environment**: `Python 3`.
+3. **Region**: Choose the region closest to your Supabase database.
+4. **Branch**: `master` (or your production branch).
+5. **Build Command**:
+   ```bash
+   pip install -r requirements.txt && alembic upgrade head
+   ```
+6. **Start Command**:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+7. **Health Check Path**: `/health`
+
+### 10.4 Required Environment Variables
+
+| Variable | Description | Example / Recommended Value |
+| :--- | :--- | :--- |
+| `ENVIRONMENT` | Runtime environment name | `production` |
+| `DEBUG` | Enable verbose debugging (MUST be false in prod) | `false` |
+| `BOT_MODE` | Bot transport mode (MUST be webhook on Render) | `webhook` |
+| `DATABASE_URL` | Supabase connection string (automatically normalizes to `+asyncpg`) | `postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres` |
+| `TELEGRAM_BOT_TOKEN` | Bot API token from @BotFather | `7123456789:AAH...` |
+| `WEBHOOK_URL` | Public webhook endpoint URL on Render | `https://<service-name>.onrender.com/api/v1/telegram/webhook` |
+| `WEBHOOK_SECRET` | Cryptographically random string (1-256 alphanumeric characters) | e.g. `openssl rand -hex 32` |
+| `ADMIN_TELEGRAM_IDS` | Comma-separated numeric Telegram IDs of administrators | `123456789,987654321` |
+| `MEMBERSHIP_ADAPTER_TYPE` | Membership verification adapter | `mock` (or `http` when live API is available) |
+| `MEMBERSHIP_API_URL` | Live membership verification endpoint (if `http`) | `https://membership.emyc.org/api/v1/verify` |
+| `MEMBERSHIP_API_KEY` | API authentication key for membership portal | Secret key |
+| `DEFAULT_LANGUAGE` | Default locale for unregistered users | `en` |
+
+### 10.5 Webhook Registration Lifecycle
+
+When the application starts on Render:
+1. `lifespan` initializes the Telegram application.
+2. The bot verifies that `BOT_MODE=webhook` and `WEBHOOK_URL` is set.
+3. It automatically registers the webhook with Telegram via `set_webhook(url=WEBHOOK_URL, secret_token=WEBHOOK_SECRET, allowed_updates=Update.ALL_TYPES)`.
+4. Telegram delivers all incoming user messages to `POST /api/v1/telegram/webhook`.
+5. The endpoint validates the `x-telegram-bot-api-secret-token` header against `WEBHOOK_SECRET` and returns 200 OK.
+
+### 10.6 Database Migration Procedure
+
+Alembic migrations are executed automatically during the build step:
+```bash
+alembic upgrade head
+```
+* **Production Safety**: The migration runner **never** drops tables or runs downgrades.
+* **Dialect Handling**: Supabase URLs provided with `postgresql://` or `postgres://` are automatically normalized to `postgresql+asyncpg://`.
+
+### 10.7 20-Point Production Smoke-Test Checklist
+
+After deploying to Render, verify the service using this checklist:
+
+1. [ ] **Container Startup**: Render service status displays `Live` on port `$PORT`.
+2. [ ] **Liveness Check**: `curl -s https://<service>.onrender.com/health` returns `{"status":"healthy",...}`.
+3. [ ] **Readiness Check**: `curl -s https://<service>.onrender.com/api/v1/health/ready` returns `{"status":"ready","database":"healthy",...}`.
+4. [ ] **Webhook Registered**: Render logs show `Successfully registered Telegram webhook`.
+5. [ ] **Bot Start**: Send `/start` to the bot; receive personalized Islamic greeting and 3-button menu.
+6. [ ] **Language Selection**: Tap `[🌐 Change Language]`; select language; verify menu reloads in that language.
+7. [ ] **Membership Prompt**: Tap `[▶️ Start Competition]`; verify format instructions `EMYC/4055828/2026`.
+8. [ ] **Membership Validation**: Submit an invalid ID (e.g. `INVALID`); verify friendly error with registration guidance.
+9. [ ] **Membership Verification**: Submit a valid ID; verify confirmed membership linked to your Telegram account.
+10. [ ] **Competition Details**: Verify title, opens_at, closes_at, duration, question count, and eligibility badge appear.
+11. [ ] **Pre-LIVE Guard**: Verify participant cannot start before competition is marked LIVE.
+12. [ ] **Exam Start**: When competition is LIVE, tap `[▶️ Start Competition]`; verify Question 1 loads cleanly.
+13. [ ] **Distraction-Free UI**: Verify only `Question X / Y`, `Time remaining`, question text, options, and `[🏁 Finish Examination]` display.
+14. [ ] **In-Place Updates**: Tap option `[B]`; verify question saves and advances without creating new messages.
+15. [ ] **Authoritative Timer**: Verify countdown proceeds server-side.
+16. [ ] **Submission Shield**: Submit examination; verify message confirms submission and results remain hidden.
+17. [ ] **Admin Operations**: Send `/admin`; verify metrics (Registered, Started, In Progress, Submitted).
+18. [ ] **Results Finalization**: As admin, tap `[🏆 Results]` -> `[📊 Finalize Scores & Rankings]`.
+19. [ ] **Results Publication**: Admin taps `[📢 Publish Results]`; verify push notification is delivered to participant.
+20. [ ] **Segregated Review**: Participant views result; taps `[✅ Correct Answers]` and `[❌ Incorrect Answers]`.
+

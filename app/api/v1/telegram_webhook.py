@@ -8,7 +8,7 @@ from app.bot.bot_app import build_application
 router = APIRouter()
 settings = get_settings()
 
-# Lazily initialized telegram application
+# Lazily initialized telegram application singleton
 _telegram_app = None
 
 
@@ -20,10 +20,28 @@ def get_telegram_application():
 
 
 async def init_telegram_webhook_app():
-    """Initializes the telegram application for webhook mode."""
+    """Initializes the telegram application and registers the webhook in webhook mode."""
     app = get_telegram_application()
     await app.initialize()
     await app.start()
+
+    if settings.WEBHOOK_URL:
+        try:
+            kwargs = {
+                "url": settings.WEBHOOK_URL,
+                "allowed_updates": Update.ALL_TYPES,
+                "drop_pending_updates": False,
+            }
+            if settings.WEBHOOK_SECRET:
+                kwargs["secret_token"] = settings.WEBHOOK_SECRET
+
+            await app.bot.set_webhook(**kwargs)
+            logger.info(f"Successfully registered Telegram webhook: url={settings.WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"Failed to register Telegram webhook: {e}", exc_info=True)
+            if settings.ENVIRONMENT == "production":
+                raise
+
     return app
 
 
@@ -34,6 +52,7 @@ async def shutdown_telegram_webhook_app():
         try:
             await _telegram_app.stop()
             await _telegram_app.shutdown()
+            logger.info("Telegram bot application stopped and shutdown cleanly.")
         except Exception as e:
             logger.warning(f"Error shutting down telegram application: {e}")
 

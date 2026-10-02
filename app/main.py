@@ -7,12 +7,10 @@ from app.core.config import get_settings
 from app.core.logging import setup_logging, logger
 from app.api.v1 import api_v1_router
 from app.tasks.deadline_sweeper import start_periodic_sweeper
+from app.api.v1.telegram_webhook import init_telegram_webhook_app, shutdown_telegram_webhook_app
 
 settings = get_settings()
 setup_logging(settings.DEBUG)
-
-
-from app.api.v1.telegram_webhook import init_telegram_webhook_app, shutdown_telegram_webhook_app
 
 
 @asynccontextmanager
@@ -42,6 +40,14 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down Telegram bot application...")
         await shutdown_telegram_webhook_app()
 
+    # Gracefully dispose database connection pool
+    try:
+        from app.core.database import engine
+        await engine.dispose()
+        logger.info("Database connection pool disposed cleanly.")
+    except Exception as e:
+        logger.warning(f"Error disposing database engine: {e}")
+
 
 def create_app() -> FastAPI:
     """FastAPI application factory."""
@@ -60,6 +66,16 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Lightweight root liveness probe for cloud deployment (Render)
+    @app.get("/health", tags=["Health"])
+    async def root_health_check():
+        """Lightweight root liveness probe."""
+        return {
+            "status": "healthy",
+            "project": settings.PROJECT_NAME,
+            "environment": settings.ENVIRONMENT,
+        }
 
     app.include_router(api_v1_router)
 
