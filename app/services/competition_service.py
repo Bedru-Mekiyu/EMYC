@@ -63,6 +63,11 @@ class DuplicateAttemptError(CompetitionError):
     pass
 
 
+class UnauthorizedAttemptAccessError(CompetitionError):
+    """Raised when a participant attempts to access or manipulate another participant's attempt."""
+    pass
+
+
 class CompetitionService:
     @staticmethod
     async def create_competition(
@@ -180,9 +185,11 @@ class CompetitionService:
         admin_id: str = "admin",
         early_closure_policy: Optional[str] = None,
     ) -> Competition:
-        """Transitions competition status following strict lifecycle rules and validation."""
+        """Transitions competition status following strict lifecycle rules, validation, and row-level locking."""
         now = now_utc()
-        comp = await db.get(Competition, competition_id)
+        stmt = select(Competition).where(Competition.id == competition_id).with_for_update()
+        res = await db.execute(stmt)
+        comp = res.scalar_one_or_none()
         if not comp:
             raise CompetitionError("Competition not found")
 
@@ -203,13 +210,13 @@ class CompetitionService:
             is_early_close = now < closes_utc
 
             if is_early_close and policy == "truncate_to_close_time":
-                # Truncate all in-progress attempts' deadlines to now and auto-submit
+                # Truncate all in-progress attempts' deadlines to now and auto-submit with skip locked
                 active_stmt = select(ExamAttempt).where(
                     and_(
                         ExamAttempt.competition_id == comp.id,
                         ExamAttempt.status == AttemptStatus.IN_PROGRESS,
                     )
-                )
+                ).with_for_update(skip_locked=True)
                 res = await db.execute(active_stmt)
                 for att in res.scalars().all():
                     att.deadline_at = now
@@ -240,7 +247,7 @@ class CompetitionService:
                 Competition.status == CompetitionStatus.LIVE,
                 Competition.closes_at <= now,
             )
-        )
+        ).with_for_update(skip_locked=True)
         res = await db.execute(stmt)
         competitions = list(res.scalars().all())
 
@@ -253,10 +260,10 @@ class CompetitionService:
                     ExamAttempt.competition_id == comp.id,
                     ExamAttempt.status == AttemptStatus.IN_PROGRESS,
                 )
-            )
+            ).with_for_update(skip_locked=True)
             act_res = await db.execute(active_stmt)
             for att in act_res.scalars().all():
-                await CompetitionService.auto_submit_expired_attempt(db, att)
+                await CompetitionService.auto_submit_expired_attempt(db, att, commit=False)
 
             log_audit_event("COMPETITION_AUTO_CLOSED", "SYSTEM", "backend", {
                 "competition_id": str(comp.id),
@@ -389,13 +396,19 @@ class CompetitionService:
 
     @staticmethod
     async def get_question_for_attempt(
-        db: AsyncSession, attempt_id: uuid.UUID, display_order: int
+        db: AsyncSession,
+        attempt_id: uuid.UUID,
+        display_order: int,
+        participant_id: Optional[uuid.UUID] = None,
     ) -> Dict:
         """Retrieves a single question for an attempt with randomized options mapped, zero answer leaks."""
         now = now_utc()
         attempt = await db.get(ExamAttempt, attempt_id)
         if not attempt:
             raise CompetitionError("Attempt not found")
+
+        if participant_id and attempt.participant_id != participant_id:
+            raise UnauthorizedAttemptAccessError("Attempt does not belong to this participant")
 
         deadline = ensure_utc(attempt.deadline_at)
 
@@ -465,12 +478,16 @@ class CompetitionService:
         attempt_id: uuid.UUID,
         question_id: uuid.UUID,
         selected_display_option: str,
+        participant_id: Optional[uuid.UUID] = None,
     ) -> Dict:
         """Idempotently records an answer, resolves canonical mapping and correctness server-side."""
         now = now_utc()
         attempt = await db.get(ExamAttempt, attempt_id)
         if not attempt:
             raise CompetitionError("Attempt not found")
+
+        if participant_id and attempt.participant_id != participant_id:
+            raise UnauthorizedAttemptAccessError("Attempt does not belong to this participant")
 
         if attempt.status != AttemptStatus.IN_PROGRESS:
             raise AttemptAlreadySubmittedError("Attempt is already closed or submitted")
@@ -551,12 +568,21 @@ class CompetitionService:
             }
 
     @staticmethod
-    async def submit_attempt(db: AsyncSession, attempt_id: uuid.UUID) -> ExamAttempt:
-        """Explicitly submits the attempt."""
+    async def submit_attempt(
+        db: AsyncSession,
+        attempt_id: uuid.UUID,
+        participant_id: Optional[uuid.UUID] = None,
+    ) -> ExamAttempt:
+        """Explicitly submits the attempt with row-level lock against concurrent sweeper races."""
         now = now_utc()
-        attempt = await db.get(ExamAttempt, attempt_id)
+        stmt = select(ExamAttempt).where(ExamAttempt.id == attempt_id).with_for_update()
+        res = await db.execute(stmt)
+        attempt = res.scalar_one_or_none()
         if not attempt:
             raise CompetitionError("Attempt not found")
+
+        if participant_id and attempt.participant_id != participant_id:
+            raise UnauthorizedAttemptAccessError("Attempt does not belong to this participant")
 
         if attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED, AttemptStatus.FINALIZED]:
             return attempt  # Idempotent
@@ -575,7 +601,9 @@ class CompetitionService:
         return attempt
 
     @staticmethod
-    async def auto_submit_expired_attempt(db: AsyncSession, attempt: ExamAttempt) -> ExamAttempt:
+    async def auto_submit_expired_attempt(
+        db: AsyncSession, attempt: ExamAttempt, commit: bool = True
+    ) -> ExamAttempt:
         """Internal helper to automatically submit an expired attempt at deadline."""
         if attempt.status != AttemptStatus.IN_PROGRESS:
             return attempt
@@ -586,8 +614,9 @@ class CompetitionService:
         attempt.status = AttemptStatus.EXPIRED
         attempt.submitted_at = deadline
         attempt.completion_seconds = (deadline - started).total_seconds()
-        await db.commit()
-        await db.refresh(attempt)
+        if commit:
+            await db.commit()
+            await db.refresh(attempt)
         log_audit_event("ATTEMPT_AUTO_SUBMITTED_EXPIRED", "SYSTEM", str(attempt.id), {
             "deadline_at": deadline.isoformat()
         })
@@ -595,19 +624,26 @@ class CompetitionService:
 
     @staticmethod
     async def sweep_expired_attempts(db: AsyncSession) -> int:
-        """Background maintenance: sweeps all expired attempts."""
-        now = datetime.now(timezone.utc)
-        stmt = select(ExamAttempt).where(
-            and_(
-                ExamAttempt.status == AttemptStatus.IN_PROGRESS,
-                ExamAttempt.deadline_at < now,
+        """Background maintenance: sweeps all expired attempts with row-level locks."""
+        now = now_utc()
+        stmt = (
+            select(ExamAttempt)
+            .where(
+                and_(
+                    ExamAttempt.status == AttemptStatus.IN_PROGRESS,
+                    ExamAttempt.deadline_at < now,
+                )
             )
+            .with_for_update(skip_locked=True)
         )
         res = await db.execute(stmt)
         expired_attempts = list(res.scalars().all())
 
         count = 0
         for att in expired_attempts:
-            await CompetitionService.auto_submit_expired_attempt(db, att)
+            await CompetitionService.auto_submit_expired_attempt(db, att, commit=False)
             count += 1
+
+        if count > 0:
+            await db.commit()
         return count

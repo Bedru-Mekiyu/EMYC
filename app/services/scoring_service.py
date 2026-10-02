@@ -44,8 +44,10 @@ class ScoringAndRankingService:
     async def finalize_competition_results(
         db: AsyncSession, competition_id: uuid.UUID, admin_id: str = "admin"
     ) -> List[ExamAttempt]:
-        """Closes any remaining attempts, computes all scores and deterministic rankings."""
-        comp = await db.get(Competition, competition_id)
+        """Closes any remaining attempts, computes all scores and deterministic rankings with row lock."""
+        stmt = select(Competition).where(Competition.id == competition_id).with_for_update()
+        res = await db.execute(stmt)
+        comp = res.scalar_one_or_none()
         if not comp:
             raise CompetitionError("Competition not found")
 
@@ -55,6 +57,9 @@ class ScoringAndRankingService:
                 await CompetitionService.update_status(
                     db, competition_id, CompetitionStatus.CLOSED, admin_id=admin_id
                 )
+                # Re-fetch locked row after status update
+                res = await db.execute(stmt)
+                comp = res.scalar_one_or_none()
             else:
                 raise CompetitionError(f"Cannot finalize results when competition status is {comp.status}")
 
@@ -120,8 +125,10 @@ class ScoringAndRankingService:
     async def publish_results(
         db: AsyncSession, competition_id: uuid.UUID, admin_id: str = "admin"
     ) -> Competition:
-        """Publishes official results, making scores and reviews visible to participants."""
-        comp = await db.get(Competition, competition_id)
+        """Publishes official results, making scores and reviews visible to participants with row lock."""
+        stmt = select(Competition).where(Competition.id == competition_id).with_for_update()
+        res = await db.execute(stmt)
+        comp = res.scalar_one_or_none()
         if not comp:
             raise CompetitionError("Competition not found")
 

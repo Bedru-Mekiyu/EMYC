@@ -19,6 +19,25 @@ def get_telegram_application():
     return _telegram_app
 
 
+async def init_telegram_webhook_app():
+    """Initializes the telegram application for webhook mode."""
+    app = get_telegram_application()
+    await app.initialize()
+    await app.start()
+    return app
+
+
+async def shutdown_telegram_webhook_app():
+    """Shuts down the telegram application cleanly."""
+    global _telegram_app
+    if _telegram_app is not None:
+        try:
+            await _telegram_app.stop()
+            await _telegram_app.shutdown()
+        except Exception as e:
+            logger.warning(f"Error shutting down telegram application: {e}")
+
+
 @router.post("/webhook")
 async def telegram_webhook(
     request: Request,

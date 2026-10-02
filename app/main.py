@@ -12,6 +12,9 @@ settings = get_settings()
 setup_logging(settings.DEBUG)
 
 
+from app.api.v1.telegram_webhook import init_telegram_webhook_app, shutdown_telegram_webhook_app
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager for startup and shutdown hooks."""
@@ -21,6 +24,11 @@ async def lifespan(app: FastAPI):
     # Launch background deadline sweeper
     sweeper_task = asyncio.create_task(start_periodic_sweeper(interval_seconds=30))
 
+    # Initialize Telegram bot runtime if in webhook mode
+    if settings.BOT_MODE == "webhook":
+        logger.info("Initializing Telegram bot application in webhook mode...")
+        await init_telegram_webhook_app()
+
     yield
 
     logger.info("Shutting down Telegram Competitive Exam Platform backend...")
@@ -29,6 +37,10 @@ async def lifespan(app: FastAPI):
         await sweeper_task
     except asyncio.CancelledError:
         pass
+
+    if settings.BOT_MODE == "webhook":
+        logger.info("Shutting down Telegram bot application...")
+        await shutdown_telegram_webhook_app()
 
 
 def create_app() -> FastAPI:

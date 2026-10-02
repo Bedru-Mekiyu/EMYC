@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -22,6 +22,7 @@ from app.services.competition_service import (
     CompetitionNotOpenError,
     AttemptExpiredError,
     DuplicateAttemptError,
+    UnauthorizedAttemptAccessError,
 )
 from app.services.scoring_service import (
     ScoringAndRankingService,
@@ -142,7 +143,7 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if attempt:
             # If in progress, resume where they left off
             if attempt.status == AttemptStatus.IN_PROGRESS:
-                await render_question_screen(query, attempt.id, display_order=1, lang=lang)
+                await render_question_screen(query, attempt.id, display_order=1, lang=lang, participant_id=participant.id)
                 return
 
             # If already submitted / finished:
@@ -235,7 +236,7 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         try:
             attempt = await CompetitionService.start_attempt(db, comp_id, participant.id)
-            await render_question_screen(query, attempt.id, display_order=1, lang=lang)
+            await render_question_screen(query, attempt.id, display_order=1, lang=lang, participant_id=participant.id)
         except CompetitionNotOpenError as e:
             await query.edit_message_text(f"⏳ {str(e)}", reply_markup=get_main_menu_keyboard(lang))
         except DuplicateAttemptError:
@@ -243,15 +244,27 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def render_question_screen(
-    query: Any, attempt_id: uuid.UUID, display_order: int, lang: str = "en"
+    query: Any,
+    attempt_id: uuid.UUID,
+    display_order: int,
+    lang: str = "en",
+    participant_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Renders single question on existing message in-place, zero chat flood."""
     async with AsyncSessionLocal() as db:
         try:
-            q_data = await CompetitionService.get_question_for_attempt(db, attempt_id, display_order)
+            q_data = await CompetitionService.get_question_for_attempt(
+                db, attempt_id, display_order, participant_id=participant_id
+            )
         except AttemptExpiredError:
             await query.edit_message_text(
                 "⏱ Your exam time has expired and your answers were automatically submitted.",
+                reply_markup=get_main_menu_keyboard(lang),
+            )
+            return
+        except UnauthorizedAttemptAccessError:
+            await query.edit_message_text(
+                "❌ Unauthorized attempt access.",
                 reply_markup=get_main_menu_keyboard(lang),
             )
             return
@@ -305,37 +318,62 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     display_order = int(parts[4])
 
     async with AsyncSessionLocal() as db:
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not participant:
+            await query.edit_message_text(get_text("membership_prompt", lang))
+            return
+        p_id = participant.id
+
         try:
-            await CompetitionService.submit_answer(db, attempt_id, question_id, selected_opt)
+            await CompetitionService.submit_answer(
+                db, attempt_id, question_id, selected_opt, participant_id=p_id
+            )
         except AttemptExpiredError:
             await query.edit_message_text(
                 "⏱ Exam time expired. Your answers were submitted.",
                 reply_markup=get_main_menu_keyboard(lang),
             )
             return
+        except UnauthorizedAttemptAccessError:
+            await query.edit_message_text(
+                "❌ Unauthorized attempt access.",
+                reply_markup=get_main_menu_keyboard(lang),
+            )
+            return
 
         # Fetch question data to check total count
-        q_data = await CompetitionService.get_question_for_attempt(db, attempt_id, display_order)
+        q_data = await CompetitionService.get_question_for_attempt(
+            db, attempt_id, display_order, participant_id=p_id
+        )
         total_questions = q_data["total_questions"]
 
     # If more questions remain, automatically advance to next question
     if display_order < total_questions:
-        await render_question_screen(query, attempt_id, display_order + 1, lang=lang)
+        await render_question_screen(query, attempt_id, display_order + 1, lang=lang, participant_id=p_id)
     else:
         # Re-render current question with selected indicator and Submit button
-        await render_question_screen(query, attempt_id, display_order, lang=lang)
+        await render_question_screen(query, attempt_id, display_order, lang=lang, participant_id=p_id)
 
 
 async def cb_question_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Navigates to specific question display order."""
     query = update.callback_query
     await query.answer()
-    lang = await get_user_lang(update.effective_user.id)
+    user = update.effective_user
+    lang = await get_user_lang(user.id)
     # format: q:nav:<attempt_id>:<display_order>
     parts = query.data.split(":")
     attempt_id = uuid.UUID(parts[2])
     display_order = int(parts[3])
-    await render_question_screen(query, attempt_id, display_order, lang=lang)
+
+    async with AsyncSessionLocal() as db:
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not participant:
+            await query.edit_message_text(get_text("membership_prompt", lang))
+            return
+        p_id = participant.id
+
+    await render_question_screen(query, attempt_id, display_order, lang=lang, participant_id=p_id)
 
 
 async def cb_submit_exam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -348,7 +386,19 @@ async def cb_submit_exam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     attempt_id = uuid.UUID(query.data.split(":")[2])
 
     async with AsyncSessionLocal() as db:
-        await CompetitionService.submit_attempt(db, attempt_id)
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not participant:
+            await query.edit_message_text(get_text("membership_prompt", lang))
+            return
+
+        try:
+            await CompetitionService.submit_attempt(db, attempt_id, participant_id=participant.id)
+        except UnauthorizedAttemptAccessError:
+            await query.edit_message_text(
+                "❌ Unauthorized attempt access.",
+                reply_markup=get_main_menu_keyboard(lang),
+            )
+            return
 
     confirm_msg = get_text("exam_submitted", lang)
     await query.edit_message_text(
