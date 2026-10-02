@@ -32,6 +32,7 @@ from app.bot.handlers.admin import (
     cb_admin_finalize,
     cb_admin_publish,
     cb_admin_announce,
+    cb_admin_announce_confirm,
 )
 
 settings = get_settings()
@@ -73,6 +74,7 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_finalize, pattern="^admin:finalize:"))
     app.add_handler(CallbackQueryHandler(cb_admin_publish, pattern="^admin:publish:"))
     app.add_handler(CallbackQueryHandler(cb_admin_announce, pattern="^admin:announce$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_announce_confirm, pattern="^admin:announce_confirm$"))
 
     # Text message handler (e.g. membership ID submission)
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))

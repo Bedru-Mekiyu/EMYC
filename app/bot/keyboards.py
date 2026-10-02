@@ -5,17 +5,19 @@ from app.locales.translator import get_text
 
 
 def get_main_menu_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Participant main menu keyboard."""
+    """Participant main menu keyboard: 3 essential buttons."""
     keyboard = [
         [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
-        [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
-        [InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help")],
+        [
+            InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang"),
+            InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help"),
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 
 def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Language selection keyboard."""
+    """Language selection keyboard: 2x2 grid with back button."""
     keyboard = [
         [
             InlineKeyboardButton("English 🇬🇧", callback_data="lang:en"),
@@ -25,7 +27,7 @@ def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
             InlineKeyboardButton("Afaan Oromoo 🌳", callback_data="lang:om"),
             InlineKeyboardButton("العربية 🇸🇦", callback_data="lang:ar"),
         ],
-        [InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")],
+        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -34,7 +36,7 @@ def get_start_exam_keyboard(competition_id: uuid.UUID, lang: str = "en") -> Inli
     """Confirmation to launch competition attempt."""
     keyboard = [
         [InlineKeyboardButton(get_text("start_exam_btn", lang), callback_data=f"exam:start:{competition_id}")],
-        [InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")],
+        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -60,10 +62,12 @@ def get_question_keyboard(
 
     # Navigation or Final Submission row
     if display_order < total_questions:
-        nav_btn = InlineKeyboardButton("⏭ Next Question", callback_data=f"q:nav:{attempt_id}:{display_order + 1}")
+        nav_label = get_text("next_question_btn", lang)
+        nav_btn = InlineKeyboardButton(nav_label, callback_data=f"q:nav:{attempt_id}:{display_order + 1}")
         keyboard.append([nav_btn])
     else:
-        submit_btn = InlineKeyboardButton("🏁 Submit Exam", callback_data=f"exam:submit:{attempt_id}")
+        submit_label = get_text("submit_exam_btn", lang)
+        submit_btn = InlineKeyboardButton(submit_label, callback_data=f"exam:submit:{attempt_id}")
         keyboard.append([submit_btn])
 
     return InlineKeyboardMarkup(keyboard)
@@ -72,7 +76,7 @@ def get_question_keyboard(
 def get_results_keyboard(
     competition_id: uuid.UUID, correct_count: int, incorrect_count: int, lang: str = "en"
 ) -> InlineKeyboardMarkup:
-    """Results post-publication keyboard with answer review options."""
+    """Results post-publication keyboard with segregated answer review options."""
     keyboard = [
         [
             InlineKeyboardButton(
@@ -91,16 +95,27 @@ def get_results_keyboard(
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_admin_keyboard() -> InlineKeyboardMarkup:
+def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     """Main administrative control panel keyboard."""
     keyboard = [
         [
-            InlineKeyboardButton("🏆 Competition", callback_data="admin:competition"),
-            InlineKeyboardButton("📊 Status", callback_data="admin:status"),
+            InlineKeyboardButton(get_text("admin_btn_status", lang), callback_data="admin:status"),
+            InlineKeyboardButton(get_text("admin_btn_results", lang), callback_data="admin:results"),
         ],
         [
-            InlineKeyboardButton("🏆 Results", callback_data="admin:results"),
-            InlineKeyboardButton("📢 Announce", callback_data="admin:announce"),
+            InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
+            InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
         ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_admin_confirm_announcement_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    """Confirmation modal keyboard before broadcasting an announcement."""
+    keyboard = [
+        [
+            InlineKeyboardButton(get_text("btn_confirm_broadcast", lang), callback_data="admin:announce_confirm"),
+            InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:home"),
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)

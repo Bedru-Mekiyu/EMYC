@@ -3,11 +3,12 @@ from typing import Dict, Any, Optional
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
+from sqlalchemy import select, and_, func
 
 from app.core.database import AsyncSessionLocal
 from app.core.logging import logger
 from app.locales.translator import get_text
-from app.models.attempt import AttemptStatus
+from app.models.attempt import ExamAttempt, AttemptStatus
 from app.models.competition import CompetitionStatus
 from app.services.membership_service import (
     ParticipantService,
@@ -34,6 +35,7 @@ from app.bot.keyboards import (
     get_start_exam_keyboard,
     get_question_keyboard,
     get_results_keyboard,
+    get_admin_confirm_announcement_keyboard,
 )
 
 
@@ -46,14 +48,23 @@ async def get_user_lang(user_id: int) -> str:
     return "en"
 
 
+def get_participant_display_name(update: Update) -> str:
+    """Extracts first name or username for greeting."""
+    user = update.effective_user
+    if not user:
+        return "Participant"
+    return user.first_name or user.username or "Participant"
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles /start command."""
+    """Handles /start command with personalized Islamic greeting and EMYC branding."""
     user = update.effective_user
     if not user:
         return
 
     lang = await get_user_lang(user.id)
-    text = get_text("welcome", lang)
+    name = get_participant_display_name(update)
+    text = get_text("welcome", lang, name=name)
     keyboard = get_main_menu_keyboard(lang)
 
     if update.message:
@@ -91,20 +102,20 @@ async def cb_select_language(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Handles language selection click."""
     query = update.callback_query
     await query.answer()
-    # format: lang:<code>
     chosen_lang = query.data.split(":")[1]
 
     async with AsyncSessionLocal() as db:
         await ParticipantService.update_language(db, update.effective_user.id, chosen_lang)
 
     confirm_text = get_text("language_updated", chosen_lang)
-    menu_text = f"{confirm_text}\n\n{get_text('welcome', chosen_lang)}"
+    name = get_participant_display_name(update)
+    menu_text = f"{confirm_text}\n\n{get_text('welcome', chosen_lang, name=name)}"
     keyboard = get_main_menu_keyboard(chosen_lang)
     await query.edit_message_text(menu_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 
 async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles 'Start' button from main menu. Guides registration or active exam."""
+    """Handles 'Start Competition' button from main menu. Guides registration or active exam."""
     query = update.callback_query
     await query.answer()
     user = update.effective_user
@@ -128,9 +139,6 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         # 3. Check existing attempt for this competition
-        from sqlalchemy import select, and_
-        from app.models.attempt import ExamAttempt
-
         stmt = select(ExamAttempt).where(
             and_(
                 ExamAttempt.competition_id == comp.id,
@@ -150,12 +158,26 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if comp.status == CompetitionStatus.PUBLISHED:
                 # Results published! Show results
                 result_data = await ScoringAndRankingService.get_participant_result(db, comp.id, participant.id)
+                total_q = result_data["total_questions"]
+                score = result_data["score"]
+                percent = round((score / total_q) * 100, 1) if total_q else 0
+
+                # Count total participants in this competition
+                total_attempts_res = await db.execute(
+                    select(func.count(ExamAttempt.id)).where(ExamAttempt.competition_id == comp.id)
+                )
+                total_participants = total_attempts_res.scalar() or 1
+
                 res_text = get_text(
                     "results_title",
                     lang,
-                    score=result_data["score"],
-                    total=result_data["total_questions"],
+                    title=comp.title,
+                    full_name=user.first_name or participant.telegram_username or participant.membership_id,
+                    score=score,
+                    total=total_q,
+                    percent=percent,
                     rank=result_data["rank"],
+                    total_participants=total_participants,
                     time=result_data["completion_time"],
                 )
                 kb = get_results_keyboard(
@@ -176,6 +198,7 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             title=comp.title,
             questions=comp.question_count,
             duration=comp.duration_minutes,
+            opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
             closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
         )
         await query.edit_message_text(
@@ -186,11 +209,40 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles text messages (primarily Membership ID input)."""
+    """Handles text messages (Membership ID input & Admin announcements)."""
     user = update.effective_user
+    if not user:
+        return
+
     lang = await get_user_lang(user.id)
     text = update.message.text.strip()
 
+    # Case A: Admin broadcast announcement flow
+    if context.user_data.get("awaiting_announcement"):
+        from app.core.config import get_settings
+        if get_settings().is_admin(user.id):
+            context.user_data["awaiting_announcement"] = False
+            context.user_data["pending_announcement"] = text
+
+            async with AsyncSessionLocal() as db:
+                from app.models.participant import Participant
+                count_res = await db.execute(select(func.count(Participant.id)))
+                p_count = count_res.scalar() or 0
+
+            preview_text = get_text(
+                "admin_confirm_broadcast",
+                lang,
+                text=text,
+                count=p_count,
+            )
+            await update.message.reply_text(
+                preview_text,
+                reply_markup=get_admin_confirm_announcement_keyboard(lang),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+    # Case B: Participant Membership ID input
     if context.user_data.get("awaiting_membership"):
         async with AsyncSessionLocal() as db:
             try:
@@ -203,14 +255,42 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 context.user_data["awaiting_membership"] = False
 
-                success_msg = get_text("membership_verified", lang, membership_id=participant.membership_id)
+                success_msg = get_text(
+                    "membership_verified",
+                    lang,
+                    full_name=user.first_name or participant.telegram_username or participant.membership_id,
+                    membership_id=participant.membership_id,
+                )
                 await update.message.reply_text(
                     success_msg,
-                    reply_markup=get_main_menu_keyboard(lang),
                     parse_mode=ParseMode.MARKDOWN,
                 )
+
+                # Check if there is an active competition to seamlessly guide the user
+                comp = await CompetitionService.get_active_competition(db)
+                if comp:
+                    exam_info_text = get_text(
+                        "exam_info",
+                        lang,
+                        title=comp.title,
+                        questions=comp.question_count,
+                        duration=comp.duration_minutes,
+                        opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
+                        closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
+                    )
+                    await update.message.reply_text(
+                        exam_info_text,
+                        reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                else:
+                    await update.message.reply_text(
+                        get_text("welcome", lang, name=get_participant_display_name(update)),
+                        reply_markup=get_main_menu_keyboard(lang),
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
             except InvalidMembershipFormatError:
-                await update.message.reply_text(get_text("membership_invalid_format", lang))
+                await update.message.reply_text(get_text("membership_invalid_format", lang), parse_mode=ParseMode.MARKDOWN)
             except MembershipNotFoundError:
                 await update.message.reply_text(get_text("membership_not_found", lang))
             except MembershipAlreadyBoundError:
@@ -225,13 +305,12 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
-    # format: exam:start:<comp_id>
     comp_id = uuid.UUID(query.data.split(":")[2])
 
     async with AsyncSessionLocal() as db:
         participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
         if not participant:
-            await query.edit_message_text(get_text("membership_prompt", lang))
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
             return
 
         try:
@@ -258,8 +337,9 @@ async def render_question_screen(
             )
         except AttemptExpiredError:
             await query.edit_message_text(
-                "⏱ Your exam time has expired and your answers were automatically submitted.",
+                get_text("time_up_auto_submit", lang),
                 reply_markup=get_main_menu_keyboard(lang),
+                parse_mode=ParseMode.MARKDOWN,
             )
             return
         except UnauthorizedAttemptAccessError:
@@ -310,7 +390,6 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
-    # format: ans:<attempt_id>:<question_id>:<opt>:<display_order>
     parts = query.data.split(":")
     attempt_id = uuid.UUID(parts[1])
     question_id = uuid.UUID(parts[2])
@@ -320,7 +399,7 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     async with AsyncSessionLocal() as db:
         participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
         if not participant:
-            await query.edit_message_text(get_text("membership_prompt", lang))
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
             return
         p_id = participant.id
 
@@ -330,8 +409,9 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except AttemptExpiredError:
             await query.edit_message_text(
-                "⏱ Exam time expired. Your answers were submitted.",
+                get_text("time_up_auto_submit", lang),
                 reply_markup=get_main_menu_keyboard(lang),
+                parse_mode=ParseMode.MARKDOWN,
             )
             return
         except UnauthorizedAttemptAccessError:
@@ -361,7 +441,6 @@ async def cb_question_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
-    # format: q:nav:<attempt_id>:<display_order>
     parts = query.data.split(":")
     attempt_id = uuid.UUID(parts[2])
     display_order = int(parts[3])
@@ -369,7 +448,7 @@ async def cb_question_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     async with AsyncSessionLocal() as db:
         participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
         if not participant:
-            await query.edit_message_text(get_text("membership_prompt", lang))
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
             return
         p_id = participant.id
 
@@ -382,13 +461,12 @@ async def cb_submit_exam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
-    # format: exam:submit:<attempt_id>
     attempt_id = uuid.UUID(query.data.split(":")[2])
 
     async with AsyncSessionLocal() as db:
         participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
         if not participant:
-            await query.edit_message_text(get_text("membership_prompt", lang))
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
             return
 
         try:
@@ -414,7 +492,6 @@ async def cb_review_answers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
-    # format: rev:<type>:<comp_id>
     parts = query.data.split(":")
     review_type = parts[1]  # "correct" or "incorrect"
     comp_id = uuid.UUID(parts[2])
@@ -446,18 +523,19 @@ async def cb_review_answers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     # Format review items
-    review_lines = [f"📋 *{review_type.capitalize()} Answers Review*\n"]
+    review_title = "✅ Correct Answers Review" if review_type == "correct" else "❌ Incorrect Answers Review"
+    review_lines = [f"📋 *{review_title}*\n"]
     for idx, item in enumerate(reviews, start=1):
         if review_type == "incorrect":
             line = (
                 f"*{idx}. {item['question_text']}*\n"
-                f"❌ Your Answer: {item['selected_display_option']}) {item['user_answer_text']}\n"
-                f"✅ Correct: {item['correct_display_option']}) {item['correct_answer_text']}\n"
+                f"❌ Your Answer: *{item['selected_display_option']})* {item['user_answer_text']}\n"
+                f"✅ Correct: *{item['correct_display_option']})* {item['correct_answer_text']}\n"
             )
         else:
             line = (
                 f"*{idx}. {item['question_text']}*\n"
-                f"✅ Answer: {item['correct_display_option']}) {item['correct_answer_text']}\n"
+                f"✅ Answer: *{item['correct_display_option']})* {item['correct_answer_text']}\n"
             )
         review_lines.append(line)
 

@@ -28,6 +28,15 @@ TestSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
+# Route application handlers to test session factory
+import app.core.database as core_db
+import app.bot.handlers.participant as bot_participant
+import app.bot.handlers.admin as bot_admin
+
+core_db.AsyncSessionLocal = TestSessionLocal
+bot_participant.AsyncSessionLocal = TestSessionLocal
+bot_admin.AsyncSessionLocal = TestSessionLocal
+
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_test_schema():
