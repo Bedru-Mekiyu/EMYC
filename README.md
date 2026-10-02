@@ -17,13 +17,16 @@ PostgreSQL Database (Supabase Source of Truth)
 * **Telegram = Minimal Interface**: The bot only handles commands, clean inline keyboards, and localized message rendering. It never evaluates scores, calculates rankings, or verifies timers on the client. Questions update in-place by editing the existing message, preventing chat flood.
 * **FastAPI = Business Logic & Authority**: Authoritative lifecycle enforcement, timer calculation, randomized question & option mapping persistence, idempotent answer recording, and pre-publication result shielding.
 * **PostgreSQL = Relational Source of Truth**: Relational integrity with database-level uniqueness constraints preventing duplicate attempts, multiple accounts per membership, or duplicate question answers.
+* **Multi-Worker & Multi-Container Concurrency**: Sweepers and lifecycle state changes utilize PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` and row-level locks. Multiple application instances can run simultaneously without duplicate attempt processing or race conditions, eliminating the need for Redis or Celery.
 
 ---
 
 ## 2. Key Features
 
-* **Strict 1-to-1 Identity & Membership Verification**:
+* **Strict 1-to-1 Identity & IDOR Elimination**:
   * Membership IDs (e.g. `EMYC/4055828/2026`) verified via a pluggable adapter (`MembershipVerificationService`).
+  * Telegram User ID is the sole authoritative participant identity across all attempt navigation, answering, and submission operations.
+  * Callback tampering is structurally rejected at both service and bot handler layers.
   * Database constraint guarantees that a single membership ID cannot be claimed by multiple Telegram accounts.
 * **4-Language Localization**:
   * Full native support for **Amharic (አማርኛ)**, **Afaan Oromoo**, **Arabic (العربية)**, and **English**.
@@ -31,15 +34,16 @@ PostgreSQL Database (Supabase Source of Truth)
 * **Authoritative Exam Timing & Randomization**:
   * Individual exam timer: $\text{deadline} = \min(\text{started\_at} + \text{duration}, \text{competition.closes\_at})$.
   * Even if a participant disconnects or closes Telegram, the countdown continues authoritatively.
-  * Auto-submission on deadline expiration or via background sweeper.
+  * Two-layer expiration: lazy submission check on any interaction + background PostgreSQL `SKIP LOCKED` sweeper.
   * Question order is randomized and stored per attempt.
   * Option letters ($A, B, C, D$) are randomized per question and canonical mappings are persisted in `attempt_question_order`. Canonical answers are never leaked to participants.
 * **Deterministic Scoring & Tie-Breaking**:
   * 1 point per correct answer, 0 for wrong, no negative marking.
-  * Ranking rule:
-    1. Higher score ranks first.
-    2. Lower completion time ranks first.
-    3. Deterministic final tie-breaker (earlier submission timestamp and attempt ID).
+  * 4-level deterministic ranking rule:
+    1. `score DESC` (Higher score ranks first).
+    2. `completion_seconds ASC` (Lower completion time ranks first).
+    3. `submitted_at ASC` (Earlier submission timestamp ranks first).
+    4. `attempt.id ASC` (Deterministic tie-breaker).
 * **Pre-Publication Information Shielding**:
   * During the exam and after submission, no scores, ranks, or correct answers are revealed.
   * Full cryptographic and logical shield until an administrator explicitly finalizes and publishes results.
@@ -56,10 +60,10 @@ PostgreSQL Database (Supabase Source of Truth)
 * **Language**: Python 3.12+
 * **Web Framework**: FastAPI (Uvicorn)
 * **Telegram Bot**: python-telegram-bot v22 (Async ApplicationBuilder)
-* **Database & ORM**: PostgreSQL / Supabase, SQLAlchemy 2.0 Async, asyncpg, Alembic
+* **Database & ORM**: PostgreSQL 16+ / Supabase, SQLAlchemy 2.0 Async, asyncpg, Alembic
 * **Validation**: Pydantic v2 & Pydantic-Settings
-* **Testing**: pytest, pytest-asyncio, httpx, aiosqlite
-* **Containerization**: Multi-stage Dockerfile & docker-compose
+* **Testing**: pytest, pytest-asyncio, httpx
+* **Containerization**: Multi-stage Dockerfile (non-root `appuser`) & docker-compose
 
 ---
 
@@ -84,7 +88,7 @@ PostgreSQL Database (Supabase Source of Truth)
 │   └── tasks/                    # Background sweeper tasks
 ├── tests/                        # Comprehensive automated test suite
 ├── docker-compose.yml            # Local development orchestration
-├── Dockerfile                    # Multi-stage production build
+├── Dockerfile                    # Multi-stage production build (non-root)
 ├── requirements.txt              # Production and test dependencies
 └── alembic.ini                   # Migration config
 ```
@@ -133,50 +137,64 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-## 6. Running with Docker Compose
+## 6. Runtime Transport Modes & Deployment Constraints
 
-To spin up both PostgreSQL and the platform backend in containers:
-```bash
-docker compose up --build -d
-```
+The platform supports two bot modes configured via `BOT_MODE`:
 
-Check health:
-```bash
-curl http://localhost:8000/api/v1/health/ready
-```
+### A. Polling Mode (`BOT_MODE=polling`)
+* **Usage**: Local development or single-container staging deployments.
+* **Constraint**: Telegram Bot API prohibits multiple concurrent polling connections on the same bot token (HTTP 409 Conflict). Therefore, polling mode **MUST** run as a single process or single worker container (`--workers 1`).
+
+### B. Webhook Mode (`BOT_MODE=webhook`)
+* **Usage**: High-scale production deployments.
+* **Mechanism**: Inbound updates delivered to `/api/v1/telegram/webhook` authenticated via `X-Telegram-Bot-Api-Secret-Token`.
+* **Horizontal Scaling**: Fully supports arbitrary multiple FastAPI / Uvicorn workers and container replicas.
 
 ---
 
-## 7. Testing Suite
+## 7. Membership Verification Adapter
 
-The repository includes extensive automated test suites covering all lifecycle states, timer calculations, randomization, idempotency, security boundaries, and end-to-end user journeys:
+The system abstracts membership validation via `MembershipVerificationService`:
+* **Mock Adapter (`MEMBERSHIP_ADAPTER_TYPE=mock`)**: Validates format (`EMYC/\d{5,10}/\d{4}`) and simulates active status (with mock blacklist).
+* **HTTP Adapter (`MEMBERSHIP_ADAPTER_TYPE=http`)**: Connects to external membership endpoint via `MEMBERSHIP_API_URL` and `MEMBERSHIP_API_KEY`.
+
+> [!IMPORTANT]
+> Real external membership verification requires the actual API contract/endpoint/authentication specification. The platform's modular adapter pattern allows drop-in integration without changes to core competition logic.
+
+---
+
+## 8. Testing Suite
+
+All 28 tests execute directly against **native PostgreSQL 17** (`competition_test_db`) without SQLite mock shortcuts:
 
 ```bash
 pytest -v
 ```
 
-### Verification Checklist:
-* `tests/test_health.py`: Liveness and database readiness probes.
-* `tests/test_database_models.py`: Relational integrity, cascade deletions, and unique constraints.
+### Verified Test Suites:
+* `tests/test_production_readiness_audit.py`: IDOR elimination, multi-worker sweeper safety with `SKIP LOCKED`, concurrent finalization races, answer-key structural shielding, and 4-level deterministic ranking ties.
+* `tests/test_architectural_corrections.py`: Pre-LIVE validation, automatic competition closure, manual early closure policies, and PostgreSQL concurrency race guards.
 * `tests/test_competition_and_exam.py`: Server-side scheduling, timer capping, randomization, and timeout auto-submission.
 * `tests/test_scoring_and_ranking.py`: Server-side scoring, deterministic tie-breaking, and pre-publication result shielding.
+* `tests/test_database_models.py`: Relational integrity, cascade deletions, and unique constraints.
 * `tests/test_membership_service.py`: Format validation, mock/external adapters, and duplicate account prevention.
 * `tests/test_telegram_bot_handlers.py`: Webhook secret verification and admin authorization guard.
 * `tests/test_notifications_and_tasks.py`: Broadcast notification delivery and background deadline sweeping.
 * `tests/test_end_to_end_lifecycle.py`: Complete 17-step end-to-end competition scenario.
+* `tests/test_health.py`: Liveness and database readiness probes.
 
 ---
 
-## 8. Operational Runbook
+## 9. Operational Runbook
 
-1. **Creating a Competition**: Prepared directly via Supabase / PostgreSQL or Admin API.
-2. **Opening the Exam**: An administrator sends `/admin` in Telegram, selects **🏆 Competition**, and taps **🟢 Open Competition**.
+1. **Creating a Competition**: Prepared directly via PostgreSQL or Seed script.
+2. **Opening the Exam**: An administrator sends `/admin` in Telegram, selects **🏆 Competition**, and taps **🟢 Open Competition**. (Enforces strict pre-LIVE validation).
 3. **Participants Register & Take Exam**:
    - Participants tap `/start` and enter their Membership ID (e.g. `EMYC/4055828/2026`).
    - Tapping **▶️ Start Competition** starts their individual timer and presents Question 1.
    - Selecting options updates the question in-place.
 4. **Closing & Finalizing Results**:
-   - When the competition closing time arrives, the background sweeper auto-submits any remaining active attempts.
+   - When the competition closing time arrives, the background sweeper auto-submits any remaining active attempts and closes the competition.
    - Admin taps `/admin` -> **🏆 Results** -> **📊 Finalize Scores & Rankings**.
 5. **Publishing Results**:
    - Admin reviews the top leaderboard preview and taps **📢 Publish Results**.
