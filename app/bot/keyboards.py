@@ -60,17 +60,19 @@ def get_start_exam_keyboard(competition_id: uuid.UUID, lang: str = "en") -> Inli
 
 def get_question_keyboard(
     attempt_id: uuid.UUID,
-    question_id: uuid.UUID,
-    display_order: int,
-    total_questions: int,
+    question_id: Optional[uuid.UUID] = None,
+    display_order: int = 1,
+    total_questions: int = 1,
     selected_opt: Optional[str] = None,
     lang: str = "en",
 ) -> InlineKeyboardMarkup:
-    """Question answer choices: A, B, C, D and Finish Examination."""
+    """Question answer choices: A, B, C, D and Finish Examination.
+    Uses compact callback under 64-byte Telegram limit: ans:<attempt_id>:<display_order>:<opt>
+    """
     buttons = []
     for opt in ["A", "B", "C", "D"]:
         label = f"🔘 {opt}" if selected_opt == opt else opt
-        cb_data = f"ans:{attempt_id}:{question_id}:{opt}:{display_order}"
+        cb_data = f"ans:{attempt_id}:{display_order}:{opt}"
         buttons.append(InlineKeyboardButton(label, callback_data=cb_data))
 
     keyboard = [buttons]
@@ -286,7 +288,7 @@ def get_admin_question_list_keyboard(comp_id: Any, page: int, total_pages: int, 
     for q in questions:
         title_snippet = q.question_text[:25] + ("..." if len(q.question_text) > 25 else "")
         rows.append([
-            InlineKeyboardButton(f"🗑 Delete #{q.order_index}: {title_snippet}", callback_data=f"admin:q_del:{comp_id}:{q.id}")
+            InlineKeyboardButton(f"🗑 Delete #{q.order_index}: {title_snippet}", callback_data=f"admin:q_del:{q.id}")
         ])
 
     # Pagination navigation

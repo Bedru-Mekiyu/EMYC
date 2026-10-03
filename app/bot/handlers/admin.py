@@ -1186,19 +1186,29 @@ async def cb_admin_q_del(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer("Deleting question...", show_alert=False)
 
     parts = query.data.split(":")
-    comp_id = uuid.UUID(parts[2])
-    q_id = uuid.UUID(parts[3])
+    if len(parts) >= 4:
+        comp_id = uuid.UUID(parts[2])
+        q_id = uuid.UUID(parts[3])
+    else:
+        comp_id = None
+        q_id = uuid.UUID(parts[2])
 
     async with AsyncSessionLocal() as db:
+        question = await db.get(CompetitionQuestion, q_id)
+        if not question:
+            await query.answer("Question not found.", show_alert=True)
+            return
+
+        if comp_id is None:
+            comp_id = question.competition_id
+
         comp = await db.get(Competition, comp_id)
         if not comp or comp.status not in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
             await query.answer("Cannot delete questions on active or closed competitions.", show_alert=True)
             return
 
-        question = await db.get(CompetitionQuestion, q_id)
-        if question:
-            await db.delete(question)
-            await db.flush()
+        await db.delete(question)
+        await db.flush()
 
         # Re-index remaining questions
         q_stmt = (

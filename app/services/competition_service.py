@@ -477,9 +477,10 @@ class CompetitionService:
     async def submit_answer(
         db: AsyncSession,
         attempt_id: uuid.UUID,
-        question_id: uuid.UUID,
-        selected_display_option: str,
+        question_id: Optional[uuid.UUID] = None,
+        selected_display_option: str = "A",
         participant_id: Optional[uuid.UUID] = None,
+        display_order: Optional[int] = None,
     ) -> Dict:
         """Idempotently records an answer, resolves canonical mapping and correctness server-side."""
         now = now_utc()
@@ -498,11 +499,33 @@ class CompetitionService:
             await CompetitionService.auto_submit_expired_attempt(db, attempt)
             raise AttemptExpiredError("Exam deadline has passed")
 
+        # Retrieve mapping for this question by question_id or display_order
+        where_clause = [AttemptQuestionOrder.attempt_id == attempt_id]
+        if question_id is not None:
+            where_clause.append(AttemptQuestionOrder.question_id == question_id)
+        elif display_order is not None:
+            where_clause.append(AttemptQuestionOrder.display_order == display_order)
+        else:
+            raise CompetitionError("Either question_id or display_order must be provided")
+
+        mapping_stmt = (
+            select(AttemptQuestionOrder)
+            .options(selectinload(AttemptQuestionOrder.question))
+            .where(and_(*where_clause))
+        )
+        m_res = await db.execute(mapping_stmt)
+        order_entry = m_res.scalar_one_or_none()
+        if not order_entry:
+            raise CompetitionError("Question does not belong to this attempt")
+
+        resolved_q_id = order_entry.question_id
+        q = order_entry.question
+
         # Check if answer already exists (idempotency)
         existing_stmt = select(ParticipantAnswer).where(
             and_(
                 ParticipantAnswer.attempt_id == attempt_id,
-                ParticipantAnswer.question_id == question_id,
+                ParticipantAnswer.question_id == resolved_q_id,
             )
         )
         res = await db.execute(existing_stmt)
@@ -513,23 +536,6 @@ class CompetitionService:
                 "selected_display_option": existing_answer.selected_display_option,
             }
 
-        # Retrieve mapping for this question
-        mapping_stmt = (
-            select(AttemptQuestionOrder)
-            .options(selectinload(AttemptQuestionOrder.question))
-            .where(
-                and_(
-                    AttemptQuestionOrder.attempt_id == attempt_id,
-                    AttemptQuestionOrder.question_id == question_id,
-                )
-            )
-        )
-        m_res = await db.execute(mapping_stmt)
-        order_entry = m_res.scalar_one_or_none()
-        if not order_entry:
-            raise CompetitionError("Question does not belong to this attempt")
-
-        q = order_entry.question
         canonical_option = order_entry.option_mapping.get(selected_display_option)
         if not canonical_option:
             raise CompetitionError(f"Invalid option selection: {selected_display_option}")
@@ -538,7 +544,7 @@ class CompetitionService:
 
         answer = ParticipantAnswer(
             attempt_id=attempt_id,
-            question_id=question_id,
+            question_id=resolved_q_id,
             selected_display_option=selected_display_option,
             resolved_canonical_option=canonical_option,
             is_correct=is_correct,
@@ -558,7 +564,7 @@ class CompetitionService:
                 select(ParticipantAnswer.selected_display_option)
                 .where(
                     ParticipantAnswer.attempt_id == attempt_id,
-                    ParticipantAnswer.question_id == question_id,
+                    ParticipantAnswer.question_id == resolved_q_id,
                 )
             )
             res_retry = await db.execute(scalar_stmt)

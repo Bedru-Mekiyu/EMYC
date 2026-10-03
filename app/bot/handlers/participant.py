@@ -694,10 +694,18 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     lang = await get_user_lang(user.id)
     parts = query.data.split(":")
-    attempt_id = uuid.UUID(parts[1])
-    question_id = uuid.UUID(parts[2])
-    selected_opt = parts[3]
-    display_order = int(parts[4])
+    if len(parts) >= 5:
+        # Legacy format: ans:attempt_id:question_id:opt:display_order
+        attempt_id = uuid.UUID(parts[1])
+        question_id = uuid.UUID(parts[2])
+        selected_opt = parts[3]
+        display_order = int(parts[4])
+    else:
+        # Compact format (< 64 bytes): ans:attempt_id:display_order:opt
+        attempt_id = uuid.UUID(parts[1])
+        display_order = int(parts[2])
+        selected_opt = parts[3]
+        question_id = None
 
     async with AsyncSessionLocal() as db:
         participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
@@ -708,7 +716,7 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         try:
             await CompetitionService.submit_answer(
-                db, attempt_id, question_id, selected_opt, participant_id=p_id
+                db, attempt_id, question_id=question_id, selected_display_option=selected_opt, participant_id=p_id, display_order=display_order
             )
         except AttemptExpiredError:
             await query.edit_message_text(

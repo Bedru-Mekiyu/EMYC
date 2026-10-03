@@ -1184,3 +1184,92 @@ async def test_admin_set_live_and_attach_standard_questions(db_session: AsyncSes
     await db_session.refresh(comp)
     assert comp.status == CompetitionStatus.CLOSED
 
+
+@pytest.mark.asyncio
+async def test_callback_data_length_under_telegram_64_byte_limit_and_compact_answer(db_session: AsyncSession):
+    """Verifies that all question option callbacks are <= 64 bytes (preventing BUTTON_DATA_INVALID)
+    and that compact answer submissions are correctly processed.
+    """
+    from app.bot.keyboards import get_question_keyboard, get_admin_question_list_keyboard
+    from app.models.attempt import ParticipantAnswer
+
+    attempt_id = uuid.uuid4()
+    q_id = uuid.uuid4()
+
+    # 1. Verify get_question_keyboard callback data lengths are <= 64 bytes
+    kb = get_question_keyboard(attempt_id, q_id, display_order=1, total_questions=20, selected_opt="A")
+    for row in kb.inline_keyboard:
+        for btn in row:
+            assert len(btn.callback_data.encode("utf-8")) <= 64, f"Callback {btn.callback_data} exceeds 64 bytes"
+            assert len(btn.callback_data) <= 64
+
+    # 2. Verify get_admin_question_list_keyboard delete button length is <= 64 bytes
+    mock_q = MagicMock(id=uuid.uuid4(), order_index=1, question_text="What is the capital of Ethiopia?")
+    admin_kb = get_admin_question_list_keyboard(comp_id=uuid.uuid4(), page=1, total_pages=1, questions=[mock_q])
+    for row in admin_kb.inline_keyboard:
+        for btn in row:
+            assert len(btn.callback_data.encode("utf-8")) <= 64, f"Admin callback {btn.callback_data} exceeds 64 bytes"
+
+    # 3. Verify compact answer submission end-to-end via cb_answer
+    participant_user = User(id=884422, first_name="Amina", is_bot=False)
+    p = await ParticipantService.register_or_bind_participant(
+        db=db_session,
+        telegram_user_id=884422,
+        membership_id="EMYC/8844220/2026",
+        telegram_username="amina_test",
+        verifier=MockMembershipVerificationService(),
+    )
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Compact Answer Exam",
+        status=CompetitionStatus.LIVE,
+        opens_at=now - timedelta(minutes=10),
+        closes_at=now + timedelta(days=2),
+        duration_minutes=30,
+        question_count=1,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    q = CompetitionQuestion(
+        competition_id=comp.id,
+        order_index=1,
+        question_text="Sample question text?",
+        options={"A": "Alpha", "B": "Beta", "C": "Gamma", "D": "Delta"},
+        correct_option="B",
+    )
+    db_session.add(q)
+    await db_session.commit()
+
+    # Start attempt
+    attempt = await CompetitionService.start_attempt(db_session, comp.id, p.id)
+
+    # Participant clicks option "A" using the compact callback: ans:<attempt_id>:<display_order>:<opt>
+    compact_cb_data = f"ans:{attempt.id}:1:A"
+    assert len(compact_cb_data.encode("utf-8")) <= 64
+
+    query = MagicMock()
+    query.data = compact_cb_data
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock()
+    query.message.reply_text = AsyncMock()
+
+    update = MagicMock(spec=Update)
+    update.effective_user = participant_user
+    update.callback_query = query
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    await cb_answer(update, context)
+
+    # Verify answer recorded in DB
+    ans_stmt = select(ParticipantAnswer).where(
+        ParticipantAnswer.attempt_id == attempt.id,
+        ParticipantAnswer.question_id == q.id,
+    )
+    ans = (await db_session.execute(ans_stmt)).scalar_one_or_none()
+    assert ans is not None
+    assert ans.selected_display_option == "A"
+
+
