@@ -4,17 +4,20 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.locales.translator import get_text
 
 
-def get_main_menu_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(lang: str = "en", is_admin: bool = False) -> InlineKeyboardMarkup:
     """Participant main menu keyboard strictly providing:
     1. ▶️ Start Competition
     2. 🌐 Change Language
     3. ❓ Help
+    4. ⚙️ Admin Dashboard (if user is admin)
     """
     keyboard = [
         [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
         [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
         [InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help")],
     ]
+    if is_admin:
+        keyboard.append([InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -116,6 +119,7 @@ def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     """Main administrative control panel keyboard:
     - Status & Results
     - Announcement & Competition
+    - Switch to Participant View
     """
     keyboard = [
         [
@@ -125,6 +129,9 @@ def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
             InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
+        ],
+        [
+            InlineKeyboardButton("👤 Switch to Participant View", callback_data="admin:to_participant"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)

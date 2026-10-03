@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -10,12 +11,17 @@ from app.core.database import AsyncSessionLocal
 from app.core.logging import logger, log_audit_event
 from app.locales.translator import get_text
 from app.models.competition import Competition, CompetitionStatus
+from app.models.question import CompetitionQuestion
 from app.models.participant import Participant
 from app.models.attempt import ExamAttempt, AttemptStatus
 from app.models.announcement import Announcement
 from app.services.competition_service import CompetitionService, CompetitionError
 from app.services.scoring_service import ScoringAndRankingService
-from app.bot.keyboards import get_admin_keyboard, get_admin_confirm_announcement_keyboard
+from app.bot.keyboards import (
+    get_admin_keyboard,
+    get_admin_confirm_announcement_keyboard,
+    get_main_menu_keyboard,
+)
 
 settings = get_settings()
 
@@ -134,7 +140,7 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 @require_admin
 async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manages competition lifecycle (Open/Close)."""
+    """Manages competition lifecycle (Open/Close/Create)."""
     query = update.callback_query
     await query.answer()
 
@@ -142,17 +148,36 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
         comp = (await db.execute(stmt)).scalar_one_or_none()
 
+        buttons = []
         if not comp:
-            await query.edit_message_text("No competition configured.", reply_markup=get_admin_keyboard("en"))
+            text = (
+                "⚙️ *EMYC Competition Management*\n\n"
+                "ℹ️ *No competition is currently configured.*\n\n"
+                "You can instantly create and launch an official test competition with sample questions:"
+            )
+            buttons.append([
+                InlineKeyboardButton("⚡ Setup Sample Competition (Live)", callback_data="admin:setup_sample:live"),
+            ])
+            buttons.append([
+                InlineKeyboardButton("📝 Setup Sample Competition (Draft)", callback_data="admin:setup_sample:draft"),
+            ])
+            buttons.append([InlineKeyboardButton("◀️ Back to Admin Panel", callback_data="admin:home")])
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
             return
 
-        buttons = []
         if comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
             buttons.append([InlineKeyboardButton("🟢 Open Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
         elif comp.status == CompetitionStatus.LIVE:
             buttons.append([InlineKeyboardButton("🔴 Close Competition (Set CLOSED)", callback_data=f"admin:set_closed:{comp.id}")])
+        elif comp.status == CompetitionStatus.CLOSED:
+            buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])
+        elif comp.status == CompetitionStatus.RESULTS_FINALIZED:
+            buttons.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp.id}")])
 
-        buttons.append([InlineKeyboardButton("◀️ Back", callback_data="admin:home")])
+        buttons.append([
+            InlineKeyboardButton("⚡ Setup New Sample Competition", callback_data="admin:setup_sample:live"),
+        ])
+        buttons.append([InlineKeyboardButton("◀️ Back to Admin Panel", callback_data="admin:home")])
 
         text = (
             f"⚙️ *EMYC Competition Lifecycle Control*\n\n"
@@ -160,8 +185,111 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             f"*Current Status:* `{comp.status}`\n"
             f"*Duration:* {comp.duration_minutes} min\n"
             f"*Questions:* {comp.question_count}\n"
+            f"*Opens:* {comp.opens_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"*Closes:* {comp.closes_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
         )
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_setup_sample(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sets up an official sample competition with authentic EMYC Islamic & General Knowledge questions."""
+    query = update.callback_query
+    await query.answer("Setting up competition...", show_alert=False)
+
+    target_mode = query.data.split(":")[2]  # "live" or "draft"
+    now = datetime.now(timezone.utc)
+
+    sample_questions = [
+        {
+            "question_text": "In Islamic history, what was the first Hijrah destination for the early Muslims before Medina?",
+            "options": {"A": "Abyssinia (Ethiopia)", "B": "Yemen", "C": "Ta'if", "D": "Egypt"},
+            "correct_option": "A",
+        },
+        {
+            "question_text": "Who was the righteous King of Abyssinia (Al-Najashi) who sheltered the Prophet Muhammad's (pbuh) companions?",
+            "options": {"A": "Armah", "B": "Ezana", "C": "Kaleb", "D": "Menelik"},
+            "correct_option": "A",
+        },
+        {
+            "question_text": "Which Surah of the Holy Quran was recited by Ja'far ibn Abi Talib before the King of Abyssinia?",
+            "options": {"A": "Surah Maryam", "B": "Surah Al-Kahf", "C": "Surah Ya-Sin", "D": "Surah Al-Baqarah"},
+            "correct_option": "A",
+        },
+        {
+            "question_text": "What is the primary objective of the Ethiopian Muslim Youth Council (EMYC)?",
+            "options": {
+                "A": "Empowering Muslim youth through education, ethics, and unity",
+                "B": "Commercial trading",
+                "C": "Political campaigning",
+                "D": "Athletic sponsorships",
+            },
+            "correct_option": "A",
+        },
+        {
+            "question_text": "How many daily obligatory prayers (Fard Salah) are prescribed in Islam?",
+            "options": {"A": "3", "B": "5", "C": "7", "D": "4"},
+            "correct_option": "B",
+        },
+    ]
+
+    async with AsyncSessionLocal() as db:
+        comp = await CompetitionService.create_competition(
+            db=db,
+            title="EMYC 2026 Youth Knowledge Challenge",
+            description="Official Ethiopian Muslim Youth Council Competitive Exam",
+            opens_at=now - timedelta(minutes=5),
+            closes_at=now + timedelta(days=7),
+            duration_minutes=30,
+            question_count=len(sample_questions),
+            status=CompetitionStatus.DRAFT,
+        )
+
+        for idx, q_data in enumerate(sample_questions, start=1):
+            q = CompetitionQuestion(
+                competition_id=comp.id,
+                question_text=q_data["question_text"],
+                options=q_data["options"],
+                correct_option=q_data["correct_option"],
+                order_index=idx,
+            )
+            db.add(q)
+        await db.commit()
+
+        if target_mode == "live":
+            await CompetitionService.update_status(
+                db, comp.id, CompetitionStatus.LIVE, admin_id=str(update.effective_user.id)
+            )
+
+    status_str = "LIVE 🟢" if target_mode == "live" else "DRAFT 📝"
+    msg = (
+        f"🎉 *Sample Competition Created!*\n\n"
+        f"*Title:* {comp.title}\n"
+        f"*Questions:* {len(sample_questions)}\n"
+        f"*Status:* `{status_str}`\n"
+        f"*Duration:* {comp.duration_minutes} minutes\n\n"
+        f"You can now manage the competition or switch to participant view to test taking the exam!"
+    )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")],
+        [InlineKeyboardButton("👤 Switch to Participant View", callback_data="admin:to_participant")],
+        [InlineKeyboardButton("◀️ Back to Admin Panel", callback_data="admin:home")],
+    ])
+    await query.edit_message_text(msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_to_participant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Switches the admin view to the participant main menu for testing."""
+    query = update.callback_query
+    await query.answer("Switching to Participant View...", show_alert=False)
+    user = update.effective_user
+    from app.bot.handlers.participant import get_user_lang, get_participant_display_name
+    lang = await get_user_lang(user.id)
+    name = get_participant_display_name(update)
+    text = get_text("welcome", lang, name=name)
+    keyboard = get_main_menu_keyboard(lang, is_admin=True)
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 
 @require_admin

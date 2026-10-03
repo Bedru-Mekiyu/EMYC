@@ -224,3 +224,82 @@ async def test_admin_announcement_confirmation_flow(db_session: AsyncSession):
     broadcast_result = confirm_query.edit_message_text.call_args[0][0]
     assert "Announcement Broadcast Completed!" in broadcast_result
     assert context.user_data.get("pending_announcement") is None
+
+
+@pytest.mark.asyncio
+async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession):
+    """Verifies that admins automatically receive Admin Dashboard on /start,
+    can setup sample competitions with 1 click, and can switch to participant view."""
+    from app.bot.handlers.participant import cmd_start
+    from app.bot.handlers.admin import cb_admin_competition, cb_admin_setup_sample, cb_admin_to_participant
+    from app.core.config import settings
+    from telegram import User
+
+    admin_id = 99912345
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="AdminUser", is_bot=False)
+
+    # 1. Admin sends /start -> automatically opens Admin Dashboard
+    update_start = MagicMock(spec=Update)
+    update_start.effective_user = admin_user
+    msg_start = MagicMock()
+    msg_start.reply_text = AsyncMock()
+    update_start.message = msg_start
+    update_start.callback_query = None
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    await cmd_start(update_start, context)
+    msg_start.reply_text.assert_called_once()
+    start_text = msg_start.reply_text.call_args[0][0]
+    assert "EMYC Competition Admin" in start_text
+    start_kb = msg_start.reply_text.call_args[1]["reply_markup"]
+    btn_texts = [b.text for row in start_kb.inline_keyboard for b in row]
+    assert "👤 Switch to Participant View" in btn_texts
+
+    # 2. Admin clicks Competition on empty DB -> shows Setup Sample Competition buttons
+    query_comp = MagicMock()
+    query_comp.answer = AsyncMock()
+    query_comp.edit_message_text = AsyncMock()
+    update_comp = MagicMock(spec=Update)
+    update_comp.effective_user = admin_user
+    update_comp.callback_query = query_comp
+
+    await cb_admin_competition(update_comp, context)
+    query_comp.edit_message_text.assert_called_once()
+    comp_text = query_comp.edit_message_text.call_args[0][0]
+    assert "No competition is currently configured" in comp_text
+    comp_kb = query_comp.edit_message_text.call_args[1]["reply_markup"]
+    comp_btn_texts = [b.text for row in comp_kb.inline_keyboard for b in row]
+    assert "⚡ Setup Sample Competition (Live)" in comp_btn_texts
+
+    # 3. Admin clicks [Setup Sample Competition (Live)] -> creates competition and sets it to LIVE
+    query_setup = MagicMock()
+    query_setup.data = "admin:setup_sample:live"
+    query_setup.answer = AsyncMock()
+    query_setup.edit_message_text = AsyncMock()
+    update_setup = MagicMock(spec=Update)
+    update_setup.effective_user = admin_user
+    update_setup.callback_query = query_setup
+
+    await cb_admin_setup_sample(update_setup, context)
+    query_setup.edit_message_text.assert_called_once()
+    setup_text = query_setup.edit_message_text.call_args[0][0]
+    assert "Sample Competition Created!" in setup_text
+    assert "LIVE" in setup_text
+
+    # 4. Admin clicks [Switch to Participant View] -> renders participant view with Admin Dashboard button
+    query_to_p = MagicMock()
+    query_to_p.answer = AsyncMock()
+    query_to_p.edit_message_text = AsyncMock()
+    update_to_p = MagicMock(spec=Update)
+    update_to_p.effective_user = admin_user
+    update_to_p.callback_query = query_to_p
+
+    await cb_admin_to_participant(update_to_p, context)
+    query_to_p.edit_message_text.assert_called_once()
+    p_text = query_to_p.edit_message_text.call_args[0][0]
+    assert "EMYC Competition" in p_text
+    p_kb = query_to_p.edit_message_text.call_args[1]["reply_markup"]
+    p_btn_texts = [b.text for row in p_kb.inline_keyboard for b in row]
+    assert "⚙️ Admin Dashboard" in p_btn_texts

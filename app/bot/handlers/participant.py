@@ -58,15 +58,25 @@ def get_participant_display_name(update: Update) -> str:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles /start command with personalized Islamic greeting and EMYC branding."""
+    """Handles /start command. Automatically routes admins directly to Admin Dashboard."""
     user = update.effective_user
     if not user:
+        return
+
+    from app.core.config import get_settings
+    settings = get_settings()
+
+    # If user is an administrator and sent /start command, open Admin Dashboard directly
+    if update.message and settings.is_admin(user.id):
+        from app.bot.handlers.admin import cmd_admin
+        await cmd_admin(update, context)
         return
 
     lang = await get_user_lang(user.id)
     name = get_participant_display_name(update)
     text = get_text("welcome", lang, name=name)
-    keyboard = get_main_menu_keyboard(lang)
+    is_admin = settings.is_admin(user.id)
+    keyboard = get_main_menu_keyboard(lang, is_admin=is_admin)
 
     if update.message:
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
