@@ -67,7 +67,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Lightweight root liveness probe for cloud deployment (Render)
+    # Root index and lightweight health probe for cloud deployment (Render)
+    @app.get("/", tags=["Health"])
+    async def root_index():
+        """Root endpoint returning service status."""
+        return {
+            "status": "online",
+            "project": "Ethiopian Muslim Youth Council (EMYC) Exam Platform",
+            "health": "/health",
+        }
+
     @app.get("/health", tags=["Health"])
     async def root_health_check():
         """Lightweight root liveness probe."""

@@ -4,6 +4,16 @@ from app.core.config import Settings
 
 
 @pytest.mark.asyncio
+async def test_root_index(client: AsyncClient):
+    """Verifies that GET / returns service status."""
+    response = await client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "online"
+    assert "EMYC" in data["project"]
+
+
+@pytest.mark.asyncio
 async def test_root_health_check(client: AsyncClient):
     """Verifies that the root /health endpoint responds with 200 OK for Render liveness probes."""
     response = await client.get("/health")
