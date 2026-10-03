@@ -14,6 +14,10 @@ from app.models.participant import Participant
 from app.models.attempt import ExamAttempt, AttemptStatus
 from app.bot.handlers.admin import (
     cmd_admin,
+    cb_admin_lang,
+    cb_admin_set_lang,
+    cb_admin_competition,
+    cb_admin_results,
     cb_admin_participants,
     cb_admin_rankings,
     cb_admin_sys_status,
@@ -800,4 +804,300 @@ def test_render_production_guard(monkeypatch):
     )
     assert s_custom.ENVIRONMENT == "staging"
     assert s_custom.BOT_MODE == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_admin_main_menu_simplified_layout(db_session: AsyncSession):
+    """Verifies that the admin main menu strictly exposes exactly 3 primary categories."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    msg = MagicMock()
+    msg.reply_text = AsyncMock()
+    update.message = msg
+    update.callback_query = None
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    await cmd_admin(update, context)
+
+    msg.reply_text.assert_called_once()
+    rendered_kb = msg.reply_text.call_args[1]["reply_markup"]
+    buttons = [b.text for row in rendered_kb.inline_keyboard for b in row]
+    callbacks = [b.callback_data for row in rendered_kb.inline_keyboard for b in row]
+
+    assert len(buttons) == 3
+    assert "🌐 Change Language" in buttons
+    assert "🏆 Manage Competition" in buttons
+    assert "📊 Competition Results" in buttons
+
+    assert callbacks == ["admin:lang", "admin:competition", "admin:results"]
+
+
+@pytest.mark.asyncio
+async def test_admin_custom_duration_flow(db_session: AsyncSession):
+    """Verifies that an admin can select custom duration, receives input validation, and creates competition with custom duration."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    # 1. Start wizard
+    query_start = MagicMock()
+    query_start.answer = AsyncMock()
+    query_start.edit_message_text = AsyncMock()
+    update_start = MagicMock(spec=Update)
+    update_start.effective_user = admin_user
+    update_start.callback_query = query_start
+    await cb_admin_create_comp_start(update_start, context)
+
+    # 2. Enter Title
+    update_title = MagicMock(spec=Update)
+    update_title.effective_user = admin_user
+    msg_title = MagicMock()
+    msg_title.text = "Custom Duration Challenge 2026"
+    msg_title.reply_text = AsyncMock()
+    update_title.message = msg_title
+    await handle_text_message(update_title, context)
+
+    # 3. Enter Description
+    update_desc = MagicMock(spec=Update)
+    update_desc.effective_user = admin_user
+    msg_desc = MagicMock()
+    msg_desc.text = "Testing Custom Durations"
+    msg_desc.reply_text = AsyncMock()
+    update_desc.message = msg_desc
+    await handle_text_message(update_desc, context)
+
+    # 4. Click [Custom Duration]
+    query_dur = MagicMock()
+    query_dur.data = "admin:create_dur:custom"
+    query_dur.answer = AsyncMock()
+    query_dur.edit_message_text = AsyncMock()
+    update_dur = MagicMock(spec=Update)
+    update_dur.effective_user = admin_user
+    update_dur.callback_query = query_dur
+    await cb_admin_create_duration(update_dur, context)
+
+    assert context.user_data["create_comp"]["step"] == "custom_duration"
+
+    # 5. Invalid duration input: "abc"
+    update_invalid = MagicMock(spec=Update)
+    update_invalid.effective_user = admin_user
+    msg_invalid = MagicMock()
+    msg_invalid.text = "invalid_number"
+    msg_invalid.reply_text = AsyncMock()
+    update_invalid.message = msg_invalid
+    await handle_text_message(update_invalid, context)
+    msg_invalid.reply_text.assert_called_once()
+    assert "Please enter a valid duration" in msg_invalid.reply_text.call_args[0][0]
+    assert context.user_data["create_comp"]["step"] == "custom_duration"
+
+    # 6. Valid custom duration input: "75"
+    update_valid = MagicMock(spec=Update)
+    update_valid.effective_user = admin_user
+    msg_valid = MagicMock()
+    msg_valid.text = "75"
+    msg_valid.reply_text = AsyncMock()
+    update_valid.message = msg_valid
+    await handle_text_message(update_valid, context)
+
+    assert context.user_data["create_comp"]["duration"] == 75
+    assert context.user_data["create_comp"]["step"] == "schedule"
+
+    # 7. Select Schedule (3 days)
+    query_sched = MagicMock()
+    query_sched.data = "admin:create_sched:3d"
+    query_sched.answer = AsyncMock()
+    query_sched.edit_message_text = AsyncMock()
+    update_sched = MagicMock(spec=Update)
+    update_sched.effective_user = admin_user
+    update_sched.callback_query = query_sched
+    await cb_admin_create_schedule(update_sched, context)
+
+    # 8. Create with standard questions
+    query_q = MagicMock()
+    query_q.data = "admin:create_q:standard"
+    query_q.answer = AsyncMock()
+    query_q.edit_message_text = AsyncMock()
+    update_q = MagicMock(spec=Update)
+    update_q.effective_user = admin_user
+    update_q.callback_query = query_q
+    await cb_admin_create_questions(update_q, context)
+
+    # Verify persisted competition
+    stmt = select(Competition).where(Competition.title == "Custom Duration Challenge 2026")
+    comp = (await db_session.execute(stmt)).scalar_one_or_none()
+    assert comp is not None
+    assert comp.duration_minutes == 75
+
+
+@pytest.mark.asyncio
+async def test_admin_competition_state_aware_controls(db_session: AsyncSession):
+    """Verifies that Competition Management renders strictly state-aware actions for SCHEDULED, LIVE, and CLOSED states."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="State Test Competition",
+        status=CompetitionStatus.SCHEDULED,
+        opens_at=now + timedelta(hours=2),
+        closes_at=now + timedelta(days=5),
+        duration_minutes=60,
+        question_count=10,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    update.callback_query = query
+
+    # 1. State: SCHEDULED
+    await cb_admin_competition(update, context)
+    rendered_kb = query.edit_message_text.call_args[1]["reply_markup"]
+    sched_btn_texts = [b.text for row in rendered_kb.inline_keyboard for b in row]
+    assert "▶️ Start Competition (Set LIVE)" in sched_btn_texts
+    assert "📝 Add Question" in sched_btn_texts
+    assert "📦 Archive Competition" in sched_btn_texts
+    assert not any("Close Competition" in t for t in sched_btn_texts)
+    assert not any("Setup Sample" in t for t in sched_btn_texts)
+
+    # 2. State: LIVE
+    comp.status = CompetitionStatus.LIVE
+    await db_session.commit()
+    query.edit_message_text.reset_mock()
+
+    await cb_admin_competition(update, context)
+    rendered_kb = query.edit_message_text.call_args[1]["reply_markup"]
+    live_btn_texts = [b.text for row in rendered_kb.inline_keyboard for b in row]
+    assert "⏹ Close Competition" in live_btn_texts
+    assert "📊 View Results" in live_btn_texts
+    assert not any("Start Competition" in t for t in live_btn_texts)
+
+    # 3. State: CLOSED
+    comp.status = CompetitionStatus.CLOSED
+    await db_session.commit()
+    query.edit_message_text.reset_mock()
+
+    await cb_admin_competition(update, context)
+    rendered_kb = query.edit_message_text.call_args[1]["reply_markup"]
+    closed_btn_texts = [b.text for row in rendered_kb.inline_keyboard for b in row]
+    assert "📊 Finalize Scores & Rankings" in closed_btn_texts
+    assert "📊 View Results" in closed_btn_texts
+
+
+@pytest.mark.asyncio
+async def test_admin_consolidated_results_and_rankings_navigation(db_session: AsyncSession):
+    """Verifies that Competition Results consolidates all operational metrics and provides clean navigation to rankings."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Results Cup 2026",
+        status=CompetitionStatus.LIVE,
+        opens_at=now - timedelta(hours=1),
+        closes_at=now + timedelta(hours=5),
+        duration_minutes=45,
+        question_count=20,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    # Create participant & attempt
+    p = Participant(telegram_user_id=881234, membership_id="EMYC/4055829/2026", language_code="en")
+    db_session.add(p)
+    await db_session.flush()
+
+    att = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=p.id,
+        status=AttemptStatus.SUBMITTED,
+        started_at=now - timedelta(minutes=30),
+        deadline_at=now + timedelta(minutes=15),
+        score=18,
+        completion_seconds=800.0,
+        rank=1,
+    )
+    db_session.add(att)
+    await db_session.commit()
+
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    update.callback_query = query
+
+    # Call cb_admin_results
+    await cb_admin_results(update, context)
+    query.edit_message_text.assert_called_once()
+    rendered_text = query.edit_message_text.call_args[0][0]
+
+    assert "Competition Results" in rendered_text
+    assert "Results Cup 2026" in rendered_text
+    assert "Registered:" in rendered_text
+    assert "Completed:" in rendered_text
+    assert "Top Score:* 18/20" in rendered_text
+
+    rendered_kb = query.edit_message_text.call_args[1]["reply_markup"]
+    btn_texts = [b.text for row in rendered_kb.inline_keyboard for b in row]
+    assert "🏅 View Rankings" in btn_texts
+
+
+@pytest.mark.asyncio
+async def test_admin_multilingual_language_switching(db_session: AsyncSession):
+    """Verifies that an admin can change language and the admin panel re-renders in the selected language."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    # Admin opens language menu
+    query_lang = MagicMock()
+    query_lang.answer = AsyncMock()
+    query_lang.edit_message_text = AsyncMock()
+    update_lang = MagicMock(spec=Update)
+    update_lang.effective_user = admin_user
+    update_lang.callback_query = query_lang
+
+    await cb_admin_lang(update_lang, context)
+    query_lang.edit_message_text.assert_called_once()
+    lang_kb = query_lang.edit_message_text.call_args[1]["reply_markup"]
+    btn_texts = [b.text for row in lang_kb.inline_keyboard for b in row]
+    assert "English 🇬🇧" in btn_texts
+    assert "አማርኛ 🇪🇹" in btn_texts
+
+    # Admin selects Amharic (admin:set_lang:am)
+    query_set = MagicMock()
+    query_set.data = "admin:set_lang:am"
+    query_set.answer = AsyncMock()
+    query_set.edit_message_text = AsyncMock()
+    update_set = MagicMock(spec=Update)
+    update_set.effective_user = admin_user
+    update_set.callback_query = query_set
+    update_set.message = None
+
+    await cb_admin_set_lang(update_set, context)
+    query_set.edit_message_text.assert_called_once()
+    admin_kb = query_set.edit_message_text.call_args[1]["reply_markup"]
+    admin_btn_texts = [b.text for row in admin_kb.inline_keyboard for b in row]
+
+    assert "🌐 ቋንቋ ቀይር" in admin_btn_texts
+    assert "🏆 ውድድር አስተዳድር" in admin_btn_texts
+    assert "📊 የውድድር ውጤቶች" in admin_btn_texts
 

@@ -18,8 +18,11 @@ from app.models.attempt import ExamAttempt, AttemptStatus
 from app.models.announcement import Announcement
 from app.services.competition_service import CompetitionService, CompetitionError
 from app.services.scoring_service import ScoringAndRankingService
+from app.services.membership_service import ParticipantService
 from app.bot.keyboards import (
     get_admin_keyboard,
+    get_admin_language_keyboard,
+    get_admin_results_keyboard,
     get_admin_confirm_announcement_keyboard,
     get_main_menu_keyboard,
     get_admin_participants_keyboard,
@@ -54,12 +57,22 @@ def require_admin(handler_func):
 
 @require_admin
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles /admin command with EMYC Competition Admin summary and controls."""
-    # Clear any pending announcement state
+    """Handles /admin command with EMYC Competition Admin summary and simplified 3-item controls."""
+    # Clear any pending interactive wizard states
     context.user_data.pop("awaiting_announcement", None)
     context.user_data.pop("pending_announcement", None)
+    context.user_data.pop("create_comp", None)
+    context.user_data.pop("q_wizard", None)
+
+    user = update.effective_user
+    user_id = user.id if user else 0
+    lang = context.user_data.get("admin_lang")
 
     async with AsyncSessionLocal() as db:
+        if not lang:
+            p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+            lang = p.language_code if p and p.language_code else "en"
+
         # Fetch active or latest competition
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
         comp = (await db.execute(stmt)).scalar_one_or_none()
@@ -83,7 +96,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     text = get_text(
         "admin_menu_title",
-        "en",
+        lang,
         title=title,
         status=status,
         registered_count=total_p,
@@ -91,13 +104,51 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         in_progress_count=in_progress,
         submitted_count=submitted,
     )
-    keyboard = get_admin_keyboard("en")
+    keyboard = get_admin_keyboard(lang)
 
     if update.message:
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     elif update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_lang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays language selection menu specifically for administrator."""
+    query = update.callback_query
+    await query.answer()
+    user = update.effective_user
+    user_id = user.id if user else 0
+    lang = context.user_data.get("admin_lang")
+
+    if not lang:
+        async with AsyncSessionLocal() as db:
+            p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+            lang = p.language_code if p and p.language_code else "en"
+
+    text = (
+        "🌐 *Change Administrator Language / ቋንቋ ቀይር*\n\n"
+        "Select your preferred language for competition control:"
+    )
+    await query.edit_message_text(text, reply_markup=get_admin_language_keyboard(lang), parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_set_lang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Updates administrator language preference and returns to admin dashboard."""
+    query = update.callback_query
+    await query.answer()
+    chosen_lang = query.data.split(":")[2]
+    user = update.effective_user
+    user_id = user.id if user else 0
+    context.user_data["admin_lang"] = chosen_lang
+
+    async with AsyncSessionLocal() as db:
+        await ParticipantService.update_language(db, user_id, chosen_lang)
+
+    # Re-render admin panel in the newly chosen language
+    await cmd_admin(update, context)
 
 
 @require_admin
@@ -151,60 +202,78 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 @require_admin
 async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manages competition lifecycle (Open/Close/Create)."""
+    """Manages competition lifecycle with clean state-aware actions."""
     query = update.callback_query
     await query.answer()
+    user = update.effective_user
+    user_id = user.id if user else 0
 
     async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+        lang = p.language_code if p and p.language_code else "en"
+
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
         comp = (await db.execute(stmt)).scalar_one_or_none()
 
         buttons = []
         if not comp:
             text = (
-                "⚙️ *EMYC Competition Management*\n\n"
+                "🏆 *Competition Management*\n\n"
                 "ℹ️ *No competition is currently configured.*\n\n"
-                "You can create an official competition or launch a test competition:"
+                "Tap below to create an official competition:"
             )
             buttons.append([
-                InlineKeyboardButton("➕ Create New Competition", callback_data="admin:create_comp:start"),
+                InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start"),
             ])
-            buttons.append([
-                InlineKeyboardButton("⚡ Setup Sample Competition (Live)", callback_data="admin:setup_sample:live"),
-            ])
-            buttons.append([InlineKeyboardButton("◀️ Back to Admin Panel", callback_data="admin:home")])
+            buttons.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
             return
 
-        if comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+        # State-aware buttons
+        if comp.status == CompetitionStatus.DRAFT:
             buttons.append([InlineKeyboardButton("🟢 Open Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
             buttons.append([
                 InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
                 InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
             ])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
+            buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
+
+        elif comp.status == CompetitionStatus.SCHEDULED:
+            buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
+            buttons.append([
+                InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
+                InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
+            ])
+            buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
+
         elif comp.status == CompetitionStatus.LIVE:
-            buttons.append([InlineKeyboardButton("🔴 Close Competition (Set CLOSED)", callback_data=f"admin:set_closed:{comp.id}")])
+            buttons.append([InlineKeyboardButton("⏹ Close Competition", callback_data=f"admin:set_closed:{comp.id}")])
+            buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
+
         elif comp.status == CompetitionStatus.CLOSED:
             buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])
+            buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
+
         elif comp.status == CompetitionStatus.RESULTS_FINALIZED:
             buttons.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp.id}")])
-            buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
-        elif comp.status == CompetitionStatus.PUBLISHED:
+            buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
-        buttons.append([
-            InlineKeyboardButton("➕ Create New Competition", callback_data="admin:create_comp:start"),
-            InlineKeyboardButton("⚡ Setup Sample (Live)", callback_data="admin:setup_sample:live"),
-        ])
-        buttons.append([InlineKeyboardButton("◀️ Back to Admin Panel", callback_data="admin:home")])
+        elif comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+            buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
+            buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
+            if comp.status == CompetitionStatus.PUBLISHED:
+                buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
+
+        buttons.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
 
         text = (
-            f"⚙️ *EMYC Competition Lifecycle Control*\n\n"
-            f"*Title:* {comp.title}\n"
+            f"🏆 *Competition Management*\n\n"
+            f"*Competition:* {comp.title}\n"
             f"*Current Status:* `{comp.status}`\n"
-            f"*Duration:* {comp.duration_minutes} min\n"
+            f"*Duration:* {comp.duration_minutes} minutes\n"
             f"*Questions:* {comp.question_count}\n"
             f"*Opens:* {comp.opens_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
             f"*Closes:* {comp.closes_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
@@ -306,47 +375,58 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @require_admin
 async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manages results finalization and publication."""
+    """Consolidated operational results dashboard answering all critical operational metrics."""
     query = update.callback_query
     await query.answer()
+    user = update.effective_user
+    user_id = user.id if user else 0
 
     async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+        lang = p.language_code if p and p.language_code else "en"
+
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
         comp = (await db.execute(stmt)).scalar_one_or_none()
         if not comp:
-            await query.edit_message_text("No competition found.", reply_markup=get_admin_keyboard("en"))
+            await query.edit_message_text("No competition found.", reply_markup=get_admin_keyboard(lang))
             return
 
-        buttons = []
-        if comp.status == CompetitionStatus.CLOSED:
-            buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])
-        elif comp.status == CompetitionStatus.RESULTS_FINALIZED:
-            buttons.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp.id}")])
+        # Registration metrics
+        total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
 
-        buttons.append([InlineKeyboardButton("◀️ Back", callback_data="admin:home")])
+        # Attempt metrics for this competition
+        attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
+        attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
-        # Leaderboard snippet if finalized or published
-        leaderboard_text = ""
-        if comp.status in [CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED]:
-            top_stmt = (
-                select(ExamAttempt)
-                .where(ExamAttempt.competition_id == comp.id)
-                .order_by(ExamAttempt.rank.asc())
-                .limit(5)
-            )
-            top_attempts = list((await db.execute(top_stmt)).scalars().all())
-            leaderboard_text = "\n\n🏅 *Top 5 Participants:*\n"
-            for att in top_attempts:
-                mins, secs = divmod(int(att.completion_seconds or 0), 60)
-                leaderboard_text += f"#{att.rank} - Score: {att.score}/{comp.question_count} ({mins:02d}:{secs:02d})\n"
+        started = len(attempts)
+        submitted = sum(1 for a in attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
+        in_progress = sum(1 for a in attempts if a.status == AttemptStatus.IN_PROGRESS)
+        expired = sum(1 for a in attempts if a.status == AttemptStatus.EXPIRED)
 
-        text = (
-            f"🏆 *EMYC Competition Results Management*\n\n"
-            f"*Competition:* {comp.title}\n"
-            f"*Status:* `{comp.status}`"
-            f"{leaderboard_text}"
-        )
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+        completion_pct = round((submitted / started) * 100, 1) if started > 0 else 0.0
+
+        finished_scores = [a.score for a in attempts if a.score is not None]
+        top_score_val = f"{max(finished_scores)}/{comp.question_count}" if finished_scores else "N/A"
+
+    dash_text = get_text(
+        "admin_results_dash",
+        lang,
+        title=comp.title,
+        registered=total_p,
+        started=started,
+        in_progress=in_progress,
+        completed=submitted,
+        expired=expired,
+        rate=completion_pct,
+        top_score=top_score_val,
+        status=comp.status,
+    )
+
+    await query.edit_message_text(
+        dash_text,
+        reply_markup=get_admin_results_keyboard(comp.id, comp.status, lang),
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 @require_admin
@@ -679,23 +759,46 @@ async def cb_admin_create_comp_start(update: Update, context: ContextTypes.DEFAU
     """Begins the interactive competition creation wizard."""
     query = update.callback_query
     await query.answer()
-    context.user_data["create_comp"] = {"step": "title"}
+    user = update.effective_user
+    user_id = user.id if user else 0
+
+    async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+        lang = p.language_code if p and p.language_code else "en"
+
+    context.user_data["create_comp"] = {"step": "title", "lang": lang}
 
     text = (
         "🏆 *Create New EMYC Competition (Step 1/4)*\n\n"
         "Please type the *Title* for the new competition in this chat:"
     )
-    cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")]])
+    cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
     await query.edit_message_text(text, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
 
 
 @require_admin
 async def cb_admin_create_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles duration selection in competition creation wizard."""
+    """Handles duration selection in competition creation wizard (presets or custom)."""
     query = update.callback_query
     await query.answer()
-    duration = int(query.data.split(":")[2])
+    user = update.effective_user
+    user_id = user.id if user else 0
+
+    async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+        lang = p.language_code if p and p.language_code else "en"
+
+    data_part = query.data.split(":")[2]
     wizard = context.user_data.get("create_comp", {})
+
+    if data_part == "custom":
+        wizard["step"] = "custom_duration"
+        prompt = get_text("admin_custom_dur_prompt", lang)
+        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
+        await query.edit_message_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    duration = int(data_part)
     wizard["duration"] = duration
     wizard["step"] = "schedule"
 

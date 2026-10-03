@@ -25,6 +25,8 @@ from app.bot.handlers.participant import (
 )
 from app.bot.handlers.admin import (
     cmd_admin,
+    cb_admin_lang,
+    cb_admin_set_lang,
     cb_admin_status,
     cb_admin_competition,
     cb_admin_setup_sample,
@@ -83,6 +85,8 @@ def build_application(token: Optional[str] = None) -> Application:
 
     # Admin Callback Queries
     app.add_handler(CallbackQueryHandler(cmd_admin, pattern="^admin:home$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_lang, pattern="^admin:lang$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_set_lang, pattern="^admin:set_lang:"))
     app.add_handler(CallbackQueryHandler(cb_admin_status, pattern="^admin:status$"))
     app.add_handler(CallbackQueryHandler(cb_admin_participants, pattern="^admin:participants$"))
     app.add_handler(CallbackQueryHandler(cb_admin_rankings, pattern="^admin:rankings(:.*)?$"))

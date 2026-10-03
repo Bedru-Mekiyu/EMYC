@@ -90,9 +90,29 @@ MESSAGES = {
         "⏳ *قيد الاختبار:* {in_progress_count}\n"
         "✅ *المسلَّمة:* {submitted_count}"
     ),
-    "admin_btn_competition": "⚙️ المسابقة",
+    "admin_btn_competition": "🏆 إدارة المسابقة",
     "admin_btn_status": "📊 الحالة",
-    "admin_btn_results": "🏆 النتائج",
+    "admin_btn_results": "📊 نتائج المسابقة",
+    "admin_btn_lang": "🌐 تغيير اللغة",
+    "admin_btn_custom_dur": "⏱ مدة مخصصة",
+    "admin_custom_dur_prompt": (
+        "⏱ *مدة مخصصة*\n\n"
+        "يرجى إدخال مدة الاختبار بالدقائق كأرقام.\n"
+        "مثال: `45` أو `75` أو `90`"
+    ),
+    "admin_custom_dur_invalid": "⚠️ يرجى إدخال مدة صحيحة بين دقيقة واحدة و 1440 دقيقة (مثال: 45).",
+    "admin_results_dash": (
+        "📊 *نتائج المسابقة*\n\n"
+        "🏆 *{title}*\n\n"
+        "👥 *المسجلون:* {registered}\n"
+        "▶️ *المبدوءة:* {started}\n"
+        "⏳ *قيد الاختبار:* {in_progress}\n"
+        "✅ *المكتملة:* {completed}\n"
+        "⌛ *المنتهية صلاحيتها:* {expired}\n\n"
+        "📈 *نسبة الإكمال:* {rate}%\n"
+        "🏅 *أعلى درجة:* {top_score}\n\n"
+        "*الحالة:* `{status}`"
+    ),
     "admin_btn_announce": "📢 إعلان",
     "admin_confirm_broadcast": (
         "📢 *تأكيد إرسال الإعلان*\n\n"

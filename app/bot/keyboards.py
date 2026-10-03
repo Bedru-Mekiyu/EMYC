@@ -116,24 +116,31 @@ def get_results_keyboard(
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Main administrative control panel keyboard with dedicated operational categories."""
+    """Main administrative control panel keyboard with exactly 3 operational categories:
+    1. 🌐 Change Language
+    2. 🏆 Manage Competition
+    3. 📊 Competition Results
+    """
+    keyboard = [
+        [InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang")],
+        [InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition")],
+        [InlineKeyboardButton(get_text("admin_btn_results", lang), callback_data="admin:results")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_admin_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    """Language selection keyboard for admin with return to admin panel."""
     keyboard = [
         [
-            InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
-            InlineKeyboardButton(get_text("admin_btn_participants", lang), callback_data="admin:participants"),
+            InlineKeyboardButton("English 🇬🇧", callback_data="admin:set_lang:en"),
+            InlineKeyboardButton("አማርኛ 🇪🇹", callback_data="admin:set_lang:am"),
         ],
         [
-            InlineKeyboardButton(get_text("admin_btn_status", lang), callback_data="admin:status"),
-            InlineKeyboardButton(get_text("admin_btn_rankings", lang), callback_data="admin:rankings"),
+            InlineKeyboardButton("Afaan Oromoo 🌳", callback_data="admin:set_lang:om"),
+            InlineKeyboardButton("العربية 🇸🇦", callback_data="admin:set_lang:ar"),
         ],
-        [
-            InlineKeyboardButton(get_text("admin_btn_results", lang), callback_data="admin:results"),
-            InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
-        ],
-        [
-            InlineKeyboardButton(get_text("admin_btn_sys_status", lang), callback_data="admin:sys_status"),
-            InlineKeyboardButton(get_text("admin_btn_participant_view", lang), callback_data="admin:to_participant"),
-        ],
+        [InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -159,7 +166,24 @@ def get_admin_rankings_keyboard(lang: str = "en", page: int = 1, total_pages: in
         rows.append(nav_buttons)
 
     rows.append([
-        InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data=f"admin:rankings:{page}"),
+        InlineKeyboardButton("📊 Results Dashboard", callback_data="admin:results"),
+        InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
+def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[str] = None, lang: str = "en") -> InlineKeyboardMarkup:
+    """Consolidated operational results dashboard keyboard."""
+    rows = []
+    if comp_id:
+        rows.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings:1")])
+        if status == "CLOSED":
+            rows.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp_id}")])
+        elif status == "RESULTS_FINALIZED":
+            rows.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp_id}")])
+
+    rows.append([
+        InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:results"),
         InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -173,7 +197,7 @@ def get_admin_system_status_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     ])
 
 
-def get_admin_create_comp_duration_keyboard() -> InlineKeyboardMarkup:
+def get_admin_create_comp_duration_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     """Interactive duration preset selector during competition creation."""
     return InlineKeyboardMarkup([
         [
@@ -184,7 +208,10 @@ def get_admin_create_comp_duration_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("⏱ 60 Minutes", callback_data="admin:create_dur:60"),
             InlineKeyboardButton("⏱ 120 Minutes", callback_data="admin:create_dur:120"),
         ],
-        [InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")],
+        [
+            InlineKeyboardButton(get_text("admin_btn_custom_dur", lang), callback_data="admin:create_dur:custom"),
+        ],
+        [InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")],
     ])
 
 

@@ -44,6 +44,7 @@ from app.bot.keyboards import (
     get_results_keyboard,
     get_admin_confirm_announcement_keyboard,
     get_admin_create_comp_duration_keyboard,
+    get_admin_create_comp_schedule_keyboard,
 )
 
 
@@ -307,7 +308,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"*Title:* {text}\n\n"
                     f"Please type a brief *Description* (or send /skip):"
                 )
-                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")]])
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
                 await update.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
                 return
 
@@ -321,9 +322,34 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 await update.message.reply_text(
                     prompt,
-                    reply_markup=get_admin_create_comp_duration_keyboard(),
+                    reply_markup=get_admin_create_comp_duration_keyboard(lang),
                     parse_mode=ParseMode.MARKDOWN,
                 )
+                return
+
+            if step == "custom_duration":
+                clean_val = text.strip()
+                if clean_val.isdigit():
+                    dur_val = int(clean_val)
+                    if 1 <= dur_val <= 1440:
+                        wizard["duration"] = dur_val
+                        wizard["step"] = "schedule"
+                        prompt = (
+                            f"📅 *Create New EMYC Competition (Step 4/4)*\n\n"
+                            f"*Title:* {wizard.get('title', 'Competition')}\n"
+                            f"*Duration:* {dur_val} minutes\n\n"
+                            f"Select the competition open window:"
+                        )
+                        await update.message.reply_text(
+                            prompt,
+                            reply_markup=get_admin_create_comp_schedule_keyboard(),
+                            parse_mode=ParseMode.MARKDOWN,
+                        )
+                        return
+
+                err_text = get_text("admin_custom_dur_invalid", lang)
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
+                await update.message.reply_text(err_text, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
                 return
 
     # Case C: Admin interactive question authoring wizard (5 steps)

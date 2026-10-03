@@ -255,9 +255,12 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     assert "EMYC Competition Admin" in start_text
     start_kb = msg_start.reply_text.call_args[1]["reply_markup"]
     btn_texts = [b.text for row in start_kb.inline_keyboard for b in row]
-    assert "👤 Switch to Participant View" in btn_texts
+    assert len(btn_texts) == 3
+    assert "🌐 Change Language" in btn_texts
+    assert "🏆 Manage Competition" in btn_texts
+    assert "📊 Competition Results" in btn_texts
 
-    # 2. Admin clicks Competition on empty DB -> shows Setup Sample Competition buttons
+    # 2. Admin clicks Competition on empty DB -> shows Create Competition button (no sample/dev buttons)
     query_comp = MagicMock()
     query_comp.answer = AsyncMock()
     query_comp.edit_message_text = AsyncMock()
@@ -271,7 +274,8 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     assert "No competition is currently configured" in comp_text
     comp_kb = query_comp.edit_message_text.call_args[1]["reply_markup"]
     comp_btn_texts = [b.text for row in comp_kb.inline_keyboard for b in row]
-    assert "⚡ Setup Sample Competition (Live)" in comp_btn_texts
+    assert "➕ Create Competition" in comp_btn_texts
+    assert not any("Setup Sample" in t for t in comp_btn_texts)
 
     # 3. Admin clicks [Setup Sample Competition (Live)] -> creates competition and sets it to LIVE
     query_setup = MagicMock()

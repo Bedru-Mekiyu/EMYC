@@ -90,9 +90,29 @@ MESSAGES = {
         "⏳ *In Progress:* {in_progress_count}\n"
         "✅ *Submitted:* {submitted_count}"
     ),
-    "admin_btn_competition": "⚙️ Competition",
+    "admin_btn_competition": "🏆 Manage Competition",
     "admin_btn_status": "📊 Status",
-    "admin_btn_results": "🏆 Results",
+    "admin_btn_results": "📊 Competition Results",
+    "admin_btn_lang": "🌐 Change Language",
+    "admin_btn_custom_dur": "⏱ Custom Duration",
+    "admin_custom_dur_prompt": (
+        "⏱ *Custom Competition Duration*\n\n"
+        "Please enter the duration in minutes as a number.\n"
+        "Example: `45` or `75` or `90`"
+    ),
+    "admin_custom_dur_invalid": "⚠️ Please enter a valid duration between 1 and 1440 minutes (e.g., 45).",
+    "admin_results_dash": (
+        "📊 *Competition Results*\n\n"
+        "🏆 *{title}*\n\n"
+        "👥 *Registered:* {registered}\n"
+        "▶️ *Started:* {started}\n"
+        "⏳ *In Progress:* {in_progress}\n"
+        "✅ *Completed:* {completed}\n"
+        "⌛ *Expired:* {expired}\n\n"
+        "📈 *Completion Rate:* {rate}%\n"
+        "🏅 *Top Score:* {top_score}\n\n"
+        "*Status:* `{status}`"
+    ),
     "admin_btn_announce": "📢 Announcement",
     "admin_confirm_broadcast": (
         "📢 *Confirm Announcement Broadcast*\n\n"

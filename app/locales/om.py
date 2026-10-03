@@ -90,9 +90,29 @@ MESSAGES = {
         "⏳ *Adeemsarra:* {in_progress_count}\n"
         "✅ *Galchan:* {submitted_count}"
     ),
-    "admin_btn_competition": "⚙️ Dorgommii",
+    "admin_btn_competition": "🏆 Dorgommii Gulaali",
     "admin_btn_status": "📊 Haala",
-    "admin_btn_results": "🏆 Firiilee",
+    "admin_btn_results": "📊 Bu'aalee Dorgommii",
+    "admin_btn_lang": "🌐 Afaan Jijjiiri",
+    "admin_btn_custom_dur": "⏱ Yeroo Addaa",
+    "admin_custom_dur_prompt": (
+        "⏱ *Yeroo Addaa*\n\n"
+        "Mee yeroo qormaataa daqiiqaadhaan lakkoofsaan galchaa.\n"
+        "Fakkeenya: `45` yookiin `75` yookiin `90`"
+    ),
+    "admin_custom_dur_invalid": "⚠️ Mee daqiiqaa 1 hanga 1440 gidduutti lakkoofsa sirrii galchaa (fakkeenyaaf: 45).",
+    "admin_results_dash": (
+        "📊 *Bu'aalee Dorgommii*\n\n"
+        "🏆 *{title}*\n\n"
+        "👥 *Galmaa'an:* {registered}\n"
+        "▶️ *Jalqaban:* {started}\n"
+        "⏳ *Adeemsarra:* {in_progress}\n"
+        "✅ *Xumuran:* {completed}\n"
+        "⌛ *Yeroon Dhumate:* {expired}\n\n"
+        "📈 *Reeshoo Xumuraa:* {rate}%\n"
+        "🏅 *Qabxii Olaanaa:* {top_score}\n\n"
+        "*Haala:* `{status}`"
+    ),
     "admin_btn_announce": "📢 Beeksisa",
     "admin_confirm_broadcast": (
         "📢 *Mirkaneessa Beeksisa Tamsaasaa*\n\n"

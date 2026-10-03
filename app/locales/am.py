@@ -90,9 +90,29 @@ MESSAGES = {
         "⏳ *በሂደት ላይ:* {in_progress_count}\n"
         "✅ *ያስገቡ:* {submitted_count}"
     ),
-    "admin_btn_competition": "⚙️ ውድድር",
+    "admin_btn_competition": "🏆 ውድድር አስተዳድር",
     "admin_btn_status": "📊 ሁኔታ",
-    "admin_btn_results": "🏆 ውጤቶች",
+    "admin_btn_results": "📊 የውድድር ውጤቶች",
+    "admin_btn_lang": "🌐 ቋንቋ ቀይር",
+    "admin_btn_custom_dur": "⏱ የተለየ የጊዜ ርዝመት",
+    "admin_custom_dur_prompt": (
+        "⏱ *የተለየ የጊዜ ርዝመት*\n\n"
+        "እባክዎ የፈተናውን የጊዜ ርዝመት በደቂቃ በቁጥር ያስገቡ።\n"
+        "ምሳሌ፦ `45` ወይም `75` ወይም `90`"
+    ),
+    "admin_custom_dur_invalid": "⚠️ እባክዎ በ1 እና 1440 ደቂቃዎች መካከል ትክክለኛ ቁጥር ያስገቡ (ለምሳሌ፦ 45)።",
+    "admin_results_dash": (
+        "📊 *የውድድር ውጤቶች*\n\n"
+        "🏆 *{title}*\n\n"
+        "👥 *የተመዘገቡ:* {registered}\n"
+        "▶️ *የጀመሩ:* {started}\n"
+        "⏳ *በሂደት ላይ:* {in_progress}\n"
+        "✅ *ያጠናቀቁ:* {completed}\n"
+        "⌛ *ጊዜ ያለፈባቸው:* {expired}\n\n"
+        "📈 *የማጠናቀቅ ምጣኔ:* {rate}%\n"
+        "🏅 *ከፍተኛ ውጤት:* {top_score}\n\n"
+        "*ሁኔታ:* `{status}`"
+    ),
     "admin_btn_announce": "📢 ማስታወቂያ",
     "admin_confirm_broadcast": (
         "📢 *የማስታወቂያ ስርጭት ማረጋገጫ*\n\n"
