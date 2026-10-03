@@ -695,9 +695,8 @@ async def render_question_screen(
 
 
 async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles participant selecting an answer option. Advances to next question in-place."""
+    """Handles participant selecting an answer option. Confirms choice with toast and highlights choice."""
     query = update.callback_query
-    await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
     parts = query.data.split(":")
@@ -717,6 +716,7 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     async with AsyncSessionLocal() as db:
         participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
         if not participant:
+            await query.answer()
             await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
             return
         p_id = participant.id
@@ -726,6 +726,7 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 db, attempt_id, question_id=question_id, selected_display_option=selected_opt, participant_id=p_id, display_order=display_order
             )
         except AttemptExpiredError:
+            await query.answer()
             await query.edit_message_text(
                 get_text("time_up_auto_submit", lang),
                 reply_markup=get_main_menu_keyboard(lang),
@@ -733,24 +734,19 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
         except UnauthorizedAttemptAccessError:
+            await query.answer()
             await query.edit_message_text(
                 "❌ Unauthorized attempt access.",
                 reply_markup=get_main_menu_keyboard(lang),
             )
             return
 
-        # Fetch question data to check total count
-        q_data = await CompetitionService.get_question_for_attempt(
-            db, attempt_id, display_order, participant_id=p_id
-        )
-        total_questions = q_data["total_questions"]
+    # Instant confirmation feedback via Telegram native toast notification
+    toast_msg = get_text("answer_selected_toast", lang, option=selected_opt)
+    await query.answer(toast_msg)
 
-    # If more questions remain, automatically advance to next question
-    if display_order < total_questions:
-        await render_question_screen(query, attempt_id, display_order + 1, lang=lang, participant_id=p_id)
-    else:
-        # Re-render current question with selected indicator and Submit button
-        await render_question_screen(query, attempt_id, display_order, lang=lang, participant_id=p_id)
+    # Re-render current question screen with the green right icon on their selected choice
+    await render_question_screen(query, attempt_id, display_order, lang=lang, participant_id=p_id)
 
 
 async def cb_question_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -825,7 +821,7 @@ async def cb_exam_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     for disp_order, q_id in orders:
         if q_id in answers_map:
             answered_orders.add(disp_order)
-            summary_lines.append(f"`Q{disp_order:02d}:` Option *{answers_map[q_id]}* 🔘")
+            summary_lines.append(f"`Q{disp_order:02d}:` Option *{answers_map[q_id]}* ✅")
         else:
             summary_lines.append(f"`Q{disp_order:02d}:` _Unanswered_ ⚠️")
 
@@ -841,7 +837,7 @@ async def cb_exam_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"{get_text('review_time', lang, time_left=time_str)}\n"
         f"{get_text('review_progress', lang, answered=answered_count, total=total_questions, unanswered=unanswered_count)}\n\n"
         f"*Quick Jump to Question:*\n"
-        f"🔘 = Answered | ⚠️ = Unanswered\n\n"
+        f"✅ = Answered | ⚠️ = Unanswered\n\n"
     )
 
     body += "\n".join(summary_lines[:25])

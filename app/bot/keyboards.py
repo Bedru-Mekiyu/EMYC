@@ -71,7 +71,7 @@ def get_question_keyboard(
     """
     buttons = []
     for opt in ["A", "B", "C", "D"]:
-        label = f"🔘 {opt}" if selected_opt == opt else opt
+        label = f"✅ {opt}" if selected_opt == opt else opt
         cb_data = f"ans:{attempt_id}:{display_order}:{opt}"
         buttons.append(InlineKeyboardButton(label, callback_data=cb_data))
 
@@ -111,7 +111,7 @@ def get_exam_review_keyboard(
     keyboard = []
     current_row = []
     for i in range(1, total_questions + 1):
-        indicator = "🔘" if i in answered_orders else "⚠️"
+        indicator = "✅" if i in answered_orders else "⚠️"
         btn_text = f"{i} {indicator}"
         current_row.append(InlineKeyboardButton(btn_text, callback_data=f"q:nav:{attempt_id}:{i}"))
         if len(current_row) == 5:

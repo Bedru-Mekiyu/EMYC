@@ -72,7 +72,7 @@ def test_keyboard_layouts():
     opts_row = q_kb.inline_keyboard[0]
     assert len(opts_row) == 4
     assert opts_row[0].text == "A"
-    assert opts_row[1].text == "🔘 B"
+    assert opts_row[1].text == "✅ B"
     assert opts_row[2].text == "C"
     assert opts_row[3].text == "D"
     assert "Next Question" in q_kb.inline_keyboard[1][0].text

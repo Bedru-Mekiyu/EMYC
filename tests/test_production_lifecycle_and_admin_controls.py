@@ -1376,7 +1376,7 @@ async def test_participant_review_answers_and_bidirectional_navigation(db_sessio
     rev_text = query_rev.edit_message_text.call_args[0][0]
     assert "Exam Progress & Answer Review" in rev_text
     assert "1 / 3 answered" in rev_text
-    assert "Option *C* 🔘" in rev_text
+    assert "Option *C* ✅" in rev_text
     assert "_Unanswered_ ⚠️" in rev_text
 
     # Verify review keyboard contains quick jump buttons for all 3 questions
