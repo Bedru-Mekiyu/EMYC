@@ -135,9 +135,11 @@ async def test_membership_verification_flow(db_session: AsyncSession):
     assert context.user_data.get("awaiting_membership") is True
     prompt_text = query.edit_message_text.call_args[0][0]
     assert "EMYC Membership Verification" in prompt_text
-    assert "EMYC/4055828/2026" in prompt_text
+    assert "registered members" in prompt_text
+    # Ensure format example is confidential and NOT leaked to the user
+    assert "4055828" not in prompt_text
 
-    # 2. User submits invalid membership ID format -> gives helpful error
+    # 2. User submits invalid membership ID format -> gives helpful error without revealing format
     update_msg_invalid = MagicMock(spec=Update)
     update_msg_invalid.effective_user = user
     msg_inv = MagicMock()
@@ -147,7 +149,8 @@ async def test_membership_verification_flow(db_session: AsyncSession):
 
     await handle_text_message(update_msg_invalid, context)
     msg_inv.reply_text.assert_called_once()
-    assert "Invalid Membership ID format" in msg_inv.reply_text.call_args[0][0]
+    assert "Invalid Membership ID" in msg_inv.reply_text.call_args[0][0]
+    assert "4055828" not in msg_inv.reply_text.call_args[0][0]
 
     # 3. User submits valid membership ID
     update_msg = MagicMock(spec=Update)

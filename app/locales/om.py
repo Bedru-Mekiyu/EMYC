@@ -12,7 +12,7 @@ MESSAGES = {
     "language_updated": "✅ Afaan milkaa'inaan jijjiirameera.",
     "help_text": (
         "🏆 *Qajeelfama Dorgommii EMYC:*\n\n"
-        "1. Eenyummeessaa miseensummaa keessan (fkn, `EMYC/4055828/2026`) mirkaneessaa.\n"
+        "1. Miseensa Waldaa Dargaggoota Muslimoota Itoophiyaa (EMYC) galmaa'aa ta'uu qabdu. Eenyummeessaa miseensummaa mirkaneessaa.\n"
         "2. Odeeffannoo dorgommii ilaalaa *Dorgommii Jalqabi* kan jedhu cuqaa.\n"
         "3. Yeroon keessan dhumuun dura gaaffilee of eeggannoon deebisaa.\n"
         "4. Yeroon yoo dhumu yookiin gaaffilee hundaa yoo xumurtan ofumaan galmaa'a.\n"
@@ -20,11 +20,12 @@ MESSAGES = {
     ),
     "membership_prompt": (
         "🆔 *Mirkaneessa Miseensummaa EMYC*\n\n"
-        "Dorgommii irratti hirmaachuuf, mee Eenyummeessaa Miseensummaa EMYC sirrii ta'e galchaa.\n\n"
-        "📌 *Fakkeenya:* `EMYC/4055828/2026`\n\n"
-        "Eenyummeessaa keessan kallattiin asitti ergaa:"
+        "Dorgommii kanarratti hirmaachuuf miseensa Waldaa Dargaggoota Muslimoota "
+        "Itoophiyaa (EMYC) galmaa'aa ta'uun dirqama.\n\n"
+        "Miseensa galmaa'aa yoo taatan, mee Eenyummeessaa Miseensummaa keessan kallattiin asitti ergaa:\n\n"
+        "*(Hanga ammaatti hin galmoofne yoo taate, mee dura damee EMYC dhiyoo jiruun galmaa'aa.)*"
     ),
-    "membership_invalid_format": "❌ Bocni Eenyummeessaa Miseensummaa sirrii miti. Fakkeenya: `EMYC/4055828/2026`",
+    "membership_invalid_format": "❌ Eenyummeessaa miseensummaa dogoggoraa. Mee lakkoofsa sirrii mirkaneeffadhaa irra deebi'aa yaalaa.",
     "membership_not_found": (
         "❌ Eenyummeessaan miseensummaa kun galmee EMYC keessatti hin argamne.\n\n"
         "Hanga ammaatti miseensa Waldaa Dargaggoota Muslimoota Itoophiyaa (EMYC) hin taane yoo taatan, "

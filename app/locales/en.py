@@ -12,7 +12,7 @@ MESSAGES = {
     "language_updated": "✅ Language updated successfully.",
     "help_text": (
         "🏆 *EMYC Competition Guidelines:*\n\n"
-        "1. Verify your Membership ID (e.g., `EMYC/4055828/2026`).\n"
+        "1. You must be an officially registered member of EMYC. Verify your Membership ID.\n"
         "2. Review the competition details and tap *Start Competition*.\n"
         "3. Answer each question carefully before your individual timer expires.\n"
         "4. Your exam is automatically submitted when time runs out or upon final question submission.\n"
@@ -20,11 +20,13 @@ MESSAGES = {
     ),
     "membership_prompt": (
         "🆔 *EMYC Membership Verification*\n\n"
-        "To participate in the competition, please enter your valid EMYC Membership ID.\n\n"
-        "📌 *Format Example:* `EMYC/4055828/2026`\n\n"
-        "Send your ID directly in this chat:"
+        "Participation in this competition is exclusively for registered members of the "
+        "Ethiopian Muslim Youth Council (EMYC).\n\n"
+        "If you are a registered member, please send your official EMYC Membership ID "
+        "directly in this chat to verify your account:\n\n"
+        "*(If you have not registered for membership yet, please contact your local EMYC branch to register first.)*"
     ),
-    "membership_invalid_format": "❌ Invalid Membership ID format. Example: `EMYC/4055828/2026`",
+    "membership_invalid_format": "❌ Invalid Membership ID. Please check your official EMYC ID and try again.",
     "membership_not_found": (
         "❌ Membership ID could not be found.\n\n"
         "If you do not have an EMYC Membership ID yet, please register through the official "
