@@ -49,6 +49,13 @@ class Settings(BaseSettings):
         """Automatically normalizes postgresql:// and postgres:// to postgresql+asyncpg:// for Supabase/Render."""
         if not v or not isinstance(v, str):
             return v
+        v = v.strip().strip("'\"")
+        if "sslmode=" in v:
+            v = (
+                v.replace("sslmode=require", "ssl=require")
+                .replace("sslmode=prefer", "ssl=prefer")
+                .replace("sslmode=disable", "ssl=disable")
+            )
         if v.startswith("postgres://"):
             return v.replace("postgres://", "postgresql+asyncpg://", 1)
         if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):

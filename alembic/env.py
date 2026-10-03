@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -19,11 +20,19 @@ if config.config_file_name is not None:
 settings = get_settings()
 # Support -x db_url=... or environment variable or settings.DATABASE_URL
 x_args = context.get_x_argument(as_dictionary=True)
-db_url = x_args.get("db_url") or settings.DATABASE_URL
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+db_url = x_args.get("db_url") or os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+if db_url:
+    db_url = db_url.strip().strip("'\"")
+    if "sslmode=" in db_url:
+        db_url = (
+            db_url.replace("sslmode=require", "ssl=require")
+            .replace("sslmode=prefer", "ssl=prefer")
+            .replace("sslmode=disable", "ssl=disable")
+        )
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 config.set_main_option("sqlalchemy.url", db_url)
 

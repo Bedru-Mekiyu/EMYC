@@ -21,6 +21,10 @@ if not is_sqlite:
             "pool_size": 20,
             "max_overflow": 10,
             "pool_pre_ping": True,
+            "connect_args": {
+                "statement_cache_size": 0,
+                "prepared_statement_cache_size": 0,
+            },
         }
     )
 
