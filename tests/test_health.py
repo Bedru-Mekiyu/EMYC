@@ -54,3 +54,26 @@ def test_database_url_normalization():
 
     s3 = Settings(DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db")
     assert s3.DATABASE_URL == "postgresql+asyncpg://user:pass@host:5432/db"
+
+
+@pytest.mark.asyncio
+async def test_bot_status_check(client: AsyncClient):
+    """Verifies that /api/v1/health/bot-status provides diagnostic information."""
+    response = await client.get("/api/v1/health/bot-status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "bot_mode" in data
+    assert "active_competition" in data
+    assert "total_registered_participants" in data
+
+
+def test_webhook_url_normalization():
+    """Verifies that Settings.get_normalized_webhook_url handles all format variations."""
+    s1 = Settings(WEBHOOK_URL="https://emyc.onrender.com")
+    assert s1.get_normalized_webhook_url() == "https://emyc.onrender.com/api/v1/telegram/webhook"
+
+    s2 = Settings(WEBHOOK_URL="https://emyc.onrender.com/webhook")
+    assert s2.get_normalized_webhook_url() == "https://emyc.onrender.com/api/v1/telegram/webhook"
+
+    s3 = Settings(WEBHOOK_URL="https://emyc.onrender.com/api/v1/telegram/webhook")
+    assert s3.get_normalized_webhook_url() == "https://emyc.onrender.com/api/v1/telegram/webhook"

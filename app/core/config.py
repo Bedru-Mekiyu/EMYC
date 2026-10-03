@@ -94,6 +94,22 @@ class Settings(BaseSettings):
         """Determines if a given Telegram user ID is authorized as an administrator."""
         return telegram_user_id in self.admin_ids
 
+    def get_normalized_webhook_url(self) -> Optional[str]:
+        """Normalizes WEBHOOK_URL so that regardless of whether user supplied base URL or subpath,
+        it accurately targets /api/v1/telegram/webhook."""
+        if not self.WEBHOOK_URL:
+            return None
+        url = self.WEBHOOK_URL.strip().rstrip("/")
+        if url.endswith("/api/v1/telegram/webhook"):
+            return url
+        if url.endswith("/webhook"):
+            url = url.removesuffix("/webhook")
+        if url.endswith("/api/v1"):
+            url = url.removesuffix("/api/v1")
+        if url.endswith("/telegram"):
+            url = url.removesuffix("/telegram")
+        return f"{url}/api/v1/telegram/webhook"
+
 
 @lru_cache()
 def get_settings() -> Settings:

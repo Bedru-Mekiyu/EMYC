@@ -25,10 +25,11 @@ async def init_telegram_webhook_app():
     await app.initialize()
     await app.start()
 
-    if settings.WEBHOOK_URL:
+    webhook_target = settings.get_normalized_webhook_url()
+    if webhook_target:
         try:
             kwargs = {
-                "url": settings.WEBHOOK_URL,
+                "url": webhook_target,
                 "allowed_updates": Update.ALL_TYPES,
                 "drop_pending_updates": False,
             }
@@ -36,7 +37,7 @@ async def init_telegram_webhook_app():
                 kwargs["secret_token"] = settings.WEBHOOK_SECRET
 
             await app.bot.set_webhook(**kwargs)
-            logger.info(f"Successfully registered Telegram webhook: url={settings.WEBHOOK_URL}")
+            logger.info(f"Successfully registered Telegram webhook: url={webhook_target}")
         except Exception as e:
             logger.error(f"Failed to register Telegram webhook: {e}", exc_info=True)
             if settings.ENVIRONMENT == "production":

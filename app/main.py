@@ -88,6 +88,11 @@ def create_app() -> FastAPI:
 
     app.include_router(api_v1_router)
 
+    # Resilient Webhook Aliases (Ensures Telegram updates are accepted regardless of exact path)
+    from app.api.v1.telegram_webhook import telegram_webhook
+    app.add_api_route("/webhook", telegram_webhook, methods=["POST"], include_in_schema=False)
+    app.add_api_route("/api/v1/webhook", telegram_webhook, methods=["POST"], include_in_schema=False)
+
     return app
 
 
