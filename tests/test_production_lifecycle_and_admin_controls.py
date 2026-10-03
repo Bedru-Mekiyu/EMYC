@@ -17,6 +17,8 @@ from app.bot.handlers.admin import (
     cb_admin_lang,
     cb_admin_set_lang,
     cb_admin_competition,
+    cb_admin_set_status,
+    cb_admin_attach_standard_questions,
     cb_admin_results,
     cb_admin_participants,
     cb_admin_rankings,
@@ -1100,4 +1102,85 @@ async def test_admin_multilingual_language_switching(db_session: AsyncSession):
     assert "🌐 ቋንቋ ቀይር" in admin_btn_texts
     assert "🏆 ውድድር አስተዳድር" in admin_btn_texts
     assert "📊 የውድድር ውጤቶች" in admin_btn_texts
+
+
+@pytest.mark.asyncio
+async def test_admin_set_live_and_attach_standard_questions(db_session: AsyncSession):
+    """Verifies that an admin can attach standard questions and activate competition to LIVE without transition errors."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Zero Questions Comp",
+        status=CompetitionStatus.DRAFT,
+        opens_at=now - timedelta(minutes=5),
+        closes_at=now + timedelta(days=5),
+        duration_minutes=30,
+        question_count=0,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+
+    # 1. View competition controls with 0 questions -> offers 1-click attach standard questions
+    query_view = MagicMock()
+    query_view.answer = AsyncMock()
+    query_view.edit_message_text = AsyncMock()
+    update_view = MagicMock(spec=Update)
+    update_view.effective_user = admin_user
+    update_view.callback_query = query_view
+
+    await cb_admin_competition(update_view, context)
+    rendered_kb = query_view.edit_message_text.call_args[1]["reply_markup"]
+    btn_texts = [b.text for row in rendered_kb.inline_keyboard for b in row]
+    assert "⚡ Attach 20 EMYC Standard Questions" in btn_texts
+
+    # 2. Attach standard questions
+    query_attach = MagicMock()
+    query_attach.data = f"admin:attach_std:{comp.id}"
+    query_attach.answer = AsyncMock()
+    query_attach.edit_message_text = AsyncMock()
+    update_attach = MagicMock(spec=Update)
+    update_attach.effective_user = admin_user
+    update_attach.callback_query = query_attach
+
+    await cb_admin_attach_standard_questions(update_attach, context)
+    await db_session.refresh(comp)
+    assert comp.question_count == 20
+
+    # 3. Transition to LIVE via admin:set_live:<id>
+    query_live = MagicMock()
+    query_live.data = f"admin:set_live:{comp.id}"
+    query_live.answer = AsyncMock()
+    query_live.edit_message_text = AsyncMock()
+    update_live = MagicMock(spec=Update)
+    update_live.effective_user = admin_user
+    update_live.callback_query = query_live
+
+    await cb_admin_set_status(update_live, context)
+    query_live.edit_message_text.assert_called_once()
+    live_text = query_live.edit_message_text.call_args[0][0]
+    assert "Competition is now LIVE" in live_text
+
+    await db_session.refresh(comp)
+    assert comp.status == CompetitionStatus.LIVE
+
+    # 4. Transition to CLOSED via admin:set_closed:<id>
+    query_close = MagicMock()
+    query_close.data = f"admin:set_closed:{comp.id}"
+    query_close.answer = AsyncMock()
+    query_close.edit_message_text = AsyncMock()
+    update_close = MagicMock(spec=Update)
+    update_close.effective_user = admin_user
+    update_close.callback_query = query_close
+
+    await cb_admin_set_status(update_close, context)
+    query_close.edit_message_text.assert_called_once()
+    close_text = query_close.edit_message_text.call_args[0][0]
+    assert "Competition is now CLOSED" in close_text
+
+    await db_session.refresh(comp)
+    assert comp.status == CompetitionStatus.CLOSED
 

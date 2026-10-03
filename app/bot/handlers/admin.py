@@ -231,20 +231,28 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # State-aware buttons
         if comp.status == CompetitionStatus.DRAFT:
-            buttons.append([InlineKeyboardButton("🟢 Open Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-            buttons.append([
-                InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
-                InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
-            ])
+            if comp.question_count == 0:
+                buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
+                buttons.append([InlineKeyboardButton("📝 Add Question Manually", callback_data=f"admin:add_q:{comp.id}")])
+            else:
+                buttons.append([InlineKeyboardButton("🟢 Open Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
+                buttons.append([
+                    InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
+                    InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
+                ])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
             buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
 
         elif comp.status == CompetitionStatus.SCHEDULED:
-            buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-            buttons.append([
-                InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
-                InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
-            ])
+            if comp.question_count == 0:
+                buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
+                buttons.append([InlineKeyboardButton("📝 Add Question Manually", callback_data=f"admin:add_q:{comp.id}")])
+            else:
+                buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
+                buttons.append([
+                    InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
+                    InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
+                ])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.LIVE:
@@ -279,6 +287,38 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             f"*Closes:* {comp.closes_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
         )
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_attach_standard_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Attaches standard question set to a competition in 1 click."""
+    query = update.callback_query
+    await query.answer("Attaching standard questions...", show_alert=False)
+    comp_id = uuid.UUID(query.data.split(":")[2])
+
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, comp_id)
+        if not comp or comp.status not in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+            await query.answer("Cannot add questions to active or closed competition.", show_alert=True)
+            return
+
+        cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp.id)
+        start_idx = ((await db.execute(cnt_stmt)).scalar() or 0) + 1
+
+        for offset, q_data in enumerate(SAMPLE_QUESTIONS):
+            q = CompetitionQuestion(
+                competition_id=comp.id,
+                question_text=q_data["question_text"],
+                options=q_data["options"],
+                correct_option=q_data["correct_option"],
+                order_index=start_idx + offset,
+            )
+            db.add(q)
+        comp.question_count = (start_idx - 1) + len(SAMPLE_QUESTIONS)
+        await db.commit()
+
+    # Refresh competition controls view
+    await cb_admin_competition(update, context)
 
 
 @require_admin
@@ -356,21 +396,56 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Transitions competition status."""
     query = update.callback_query
     await query.answer()
+    user = update.effective_user
+    user_id = user.id if user else 0
+
     # format: admin:set_live:<id> or admin:set_closed:<id>
-    action, _, comp_id_str = query.data.split(":")
-    comp_id = uuid.UUID(comp_id_str)
-    new_status = CompetitionStatus.LIVE if "live" in action else CompetitionStatus.CLOSED
+    parts = query.data.split(":")
+    action_type = parts[1]  # "set_live" or "set_closed"
+    comp_id = uuid.UUID(parts[2])
+    new_status = CompetitionStatus.LIVE if "live" in action_type else CompetitionStatus.CLOSED
 
     async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+        lang = p.language_code if p and p.language_code else "en"
+
         try:
-            await CompetitionService.update_status(db, comp_id, new_status, admin_id=str(update.effective_user.id))
+            comp = await CompetitionService.update_status(db, comp_id, new_status, admin_id=str(user_id))
+            status_emoji = "LIVE 🟢" if new_status == CompetitionStatus.LIVE else "CLOSED 🔴"
+            msg = (
+                f"✅ *Competition is now {status_emoji}!*\n\n"
+                f"*Title:* {comp.title}\n"
+                f"*Questions:* {comp.question_count}\n"
+                f"*Duration:* {comp.duration_minutes} minutes\n\n"
+            )
+            if new_status == CompetitionStatus.LIVE:
+                msg += "🎉 The competition is officially open! Participants can now take the exam."
+            else:
+                msg += "The competition has closed. You can now finalize scores and rankings in Results."
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🏆 Manage Competition", callback_data="admin:competition")],
+                [InlineKeyboardButton("📊 View Results", callback_data="admin:results")],
+                [InlineKeyboardButton("◀️ Admin Menu", callback_data="admin:home")],
+            ])
+            await query.edit_message_text(msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        except CompetitionValidationError as ve:
+            err_msg = (
+                f"⚠️ *Cannot open competition yet:*\n\n"
+                f"{chr(10).join('• ' + e for e in ve.errors)}\n\n"
+                "Please configure questions or schedule before setting to LIVE."
+            )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")],
+                [InlineKeyboardButton("◀️ Admin Menu", callback_data="admin:home")],
+            ])
+            await query.edit_message_text(err_msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        except CompetitionError as e:
             await query.edit_message_text(
-                f"✅ Competition status successfully updated to `{new_status}`.",
-                reply_markup=get_admin_keyboard("en"),
+                f"❌ Error: {str(e)}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]]),
                 parse_mode=ParseMode.MARKDOWN,
             )
-        except CompetitionError as e:
-            await query.edit_message_text(f"❌ Error: {str(e)}", reply_markup=get_admin_keyboard("en"))
 
 
 @require_admin
