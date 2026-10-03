@@ -22,6 +22,7 @@ from app.bot.keyboards import (
     get_admin_confirm_announcement_keyboard,
     get_main_menu_keyboard,
 )
+from app.scripts.seed_questions import SAMPLE_QUESTIONS
 
 settings = get_settings()
 
@@ -200,38 +201,7 @@ async def cb_admin_setup_sample(update: Update, context: ContextTypes.DEFAULT_TY
     target_mode = query.data.split(":")[2]  # "live" or "draft"
     now = datetime.now(timezone.utc)
 
-    sample_questions = [
-        {
-            "question_text": "In Islamic history, what was the first Hijrah destination for the early Muslims before Medina?",
-            "options": {"A": "Abyssinia (Ethiopia)", "B": "Yemen", "C": "Ta'if", "D": "Egypt"},
-            "correct_option": "A",
-        },
-        {
-            "question_text": "Who was the righteous King of Abyssinia (Al-Najashi) who sheltered the Prophet Muhammad's (pbuh) companions?",
-            "options": {"A": "Armah", "B": "Ezana", "C": "Kaleb", "D": "Menelik"},
-            "correct_option": "A",
-        },
-        {
-            "question_text": "Which Surah of the Holy Quran was recited by Ja'far ibn Abi Talib before the King of Abyssinia?",
-            "options": {"A": "Surah Maryam", "B": "Surah Al-Kahf", "C": "Surah Ya-Sin", "D": "Surah Al-Baqarah"},
-            "correct_option": "A",
-        },
-        {
-            "question_text": "What is the primary objective of the Ethiopian Muslim Youth Council (EMYC)?",
-            "options": {
-                "A": "Empowering Muslim youth through education, ethics, and unity",
-                "B": "Commercial trading",
-                "C": "Political campaigning",
-                "D": "Athletic sponsorships",
-            },
-            "correct_option": "A",
-        },
-        {
-            "question_text": "How many daily obligatory prayers (Fard Salah) are prescribed in Islam?",
-            "options": {"A": "3", "B": "5", "C": "7", "D": "4"},
-            "correct_option": "B",
-        },
-    ]
+    sample_questions = SAMPLE_QUESTIONS
 
     async with AsyncSessionLocal() as db:
         comp = await CompetitionService.create_competition(
