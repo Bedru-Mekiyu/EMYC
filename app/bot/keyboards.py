@@ -4,21 +4,32 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.locales.translator import get_text
 
 
-def get_main_menu_keyboard(lang: str = "en", is_admin: bool = False) -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(
+    lang: str = "en",
+    is_admin: bool = False,
+    published_comp_id: Optional[uuid.UUID] = None,
+) -> InlineKeyboardMarkup:
     """Participant main menu keyboard strictly providing:
     1. ▶️ Start Competition
-    2. 🌐 Change Language
-    3. ❓ Help
-    4. ⚙️ Admin Dashboard (if user is admin)
+    2. 🏆 My Result (if published competition attempt exists)
+    3. 🌐 Change Language
+    4. ❓ Help
+    5. ⚙️ Admin Dashboard (if user is admin)
     """
-    keyboard = [
+    rows = [
         [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
+    ]
+    if published_comp_id:
+        rows.append(
+            [InlineKeyboardButton(get_text("my_result_btn", lang), callback_data=f"rev:my_result:{published_comp_id}")]
+        )
+    rows.extend([
         [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
         [InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help")],
-    ]
+    ])
     if is_admin:
-        keyboard.append([InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")])
-    return InlineKeyboardMarkup(keyboard)
+        rows.append([InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")])
+    return InlineKeyboardMarkup(rows)
 
 
 def get_membership_prompt_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
@@ -129,29 +140,89 @@ def get_exam_review_keyboard(
 
 
 def get_results_keyboard(
-    competition_id: uuid.UUID, correct_count: int, incorrect_count: int, lang: str = "en"
+    competition_id: uuid.UUID,
+    correct_count: Optional[int] = None,
+    incorrect_count: Optional[int] = None,
+    lang: str = "en",
 ) -> InlineKeyboardMarkup:
-    """Results post-publication keyboard with segregated answer review options:
-    - ✅ Correct Answers
-    - ❌ Incorrect Answers
+    """Results post-publication keyboard with single review option or legacy segregated options:
+    - 📖 Review Answers (or legacy Correct/Incorrect buttons if counts explicitly provided)
     - 🔙 Main Menu
     """
+    if correct_count is not None and incorrect_count is not None:
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    get_text("view_correct_btn", lang, count=correct_count),
+                    callback_data=f"rev:correct:{competition_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    get_text("view_incorrect_btn", lang, count=incorrect_count),
+                    callback_data=f"rev:incorrect:{competition_id}",
+                )
+            ],
+            [InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")],
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
     keyboard = [
         [
             InlineKeyboardButton(
-                get_text("view_correct_btn", lang, count=correct_count),
-                callback_data=f"rev:correct:{competition_id}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                get_text("view_incorrect_btn", lang, count=incorrect_count),
-                callback_data=f"rev:incorrect:{competition_id}",
+                get_text("review_answers_btn", lang),
+                callback_data=f"rev:q:{competition_id}:1",
             )
         ],
         [InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def get_answer_review_nav_keyboard(
+    competition_id: uuid.UUID,
+    display_order: int,
+    total_questions: int,
+    lang: str = "en",
+) -> InlineKeyboardMarkup:
+    """Keyboard for 1-question-at-a-time post-exam answer review with Prev/Next, Back to My Result, and Main Menu."""
+    rows = []
+    nav_row = []
+    if display_order > 1:
+        nav_row.append(
+            InlineKeyboardButton(
+                get_text("btn_prev", lang),
+                callback_data=f"rev:q:{competition_id}:{display_order - 1}",
+            )
+        )
+    nav_row.append(
+        InlineKeyboardButton(
+            f"{display_order} / {total_questions}",
+            callback_data=f"rev:q:{competition_id}:{display_order}",
+        )
+    )
+    if display_order < total_questions:
+        nav_row.append(
+            InlineKeyboardButton(
+                get_text("btn_next", lang),
+                callback_data=f"rev:q:{competition_id}:{display_order + 1}",
+            )
+        )
+    rows.append(nav_row)
+
+    rows.append([
+        InlineKeyboardButton(
+            get_text("back_to_my_result_btn", lang),
+            callback_data=f"rev:my_result:{competition_id}",
+        )
+    ])
+    rows.append([
+        InlineKeyboardButton(
+            get_text("back_to_menu_btn", lang),
+            callback_data="menu:home",
+        )
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:

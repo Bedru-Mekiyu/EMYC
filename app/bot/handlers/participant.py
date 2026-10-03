@@ -44,6 +44,7 @@ from app.bot.keyboards import (
     get_question_keyboard,
     get_exam_review_keyboard,
     get_results_keyboard,
+    get_answer_review_nav_keyboard,
     get_admin_confirm_announcement_keyboard,
     get_admin_create_comp_duration_keyboard,
     get_admin_create_comp_schedule_keyboard,
@@ -86,7 +87,26 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     name = get_participant_display_name(update)
     text = get_text("welcome", lang, name=name)
     is_admin = settings.is_admin(user.id)
-    keyboard = get_main_menu_keyboard(lang, is_admin=is_admin)
+
+    published_comp_id = None
+    async with AsyncSessionLocal() as db:
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if participant:
+            pub_res = await db.execute(
+                select(ExamAttempt.competition_id)
+                .join(Competition, ExamAttempt.competition_id == Competition.id)
+                .where(
+                    and_(
+                        ExamAttempt.participant_id == participant.id,
+                        Competition.status == CompetitionStatus.PUBLISHED,
+                    )
+                )
+                .order_by(ExamAttempt.created_at.desc())
+                .limit(1)
+            )
+            published_comp_id = pub_res.scalar_one_or_none()
+
+    keyboard = get_main_menu_keyboard(lang, is_admin=is_admin, published_comp_id=published_comp_id)
 
     if update.message:
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
@@ -159,6 +179,29 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # 2. Registered -> Check active competition
         comp = await CompetitionService.get_active_competition(db)
         if not comp:
+            # Check if participant has an attempt for the latest completed/published competition
+            latest_attempt_stmt = (
+                select(ExamAttempt, Competition)
+                .join(Competition, ExamAttempt.competition_id == Competition.id)
+                .where(ExamAttempt.participant_id == participant.id)
+                .order_by(ExamAttempt.created_at.desc())
+                .limit(1)
+            )
+            latest_res = await db.execute(latest_attempt_stmt)
+            latest_row = latest_res.first()
+
+            if latest_row:
+                prev_attempt, prev_comp = latest_row
+                name = get_participant_display_name(update)
+                if prev_comp.status == CompetitionStatus.PUBLISHED:
+                    await render_participant_result_screen(query, prev_comp.id, participant.id, lang, name)
+                    return
+                elif prev_attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]:
+                    text = get_text("results_pending_notice", lang)
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                    await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                    return
+
             from app.core.config import get_settings
             if get_settings().is_admin(user.id):
                 admin_hint = (
@@ -208,40 +251,15 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 return
 
             # If already submitted / finished:
+            name = get_participant_display_name(update)
             if comp.status == CompetitionStatus.PUBLISHED:
-                # Results published! Show results
-                result_data = await ScoringAndRankingService.get_participant_result(db, comp.id, participant.id)
-                total_q = result_data["total_questions"]
-                score = result_data["score"]
-                percent = round((score / total_q) * 100, 1) if total_q else 0
-
-                # Count total participants in this competition
-                total_attempts_res = await db.execute(
-                    select(func.count(ExamAttempt.id)).where(ExamAttempt.competition_id == comp.id)
-                )
-                total_participants = total_attempts_res.scalar() or 1
-
-                res_text = get_text(
-                    "results_title",
-                    lang,
-                    title=comp.title,
-                    full_name=user.first_name or participant.telegram_username or participant.membership_id,
-                    score=score,
-                    total=total_q,
-                    percent=percent,
-                    rank=result_data["rank"],
-                    total_participants=total_participants,
-                    time=result_data["completion_time"],
-                )
-                kb = get_results_keyboard(
-                    comp.id, result_data["correct_count"] or 0, result_data["incorrect_count"] or 0, lang=lang
-                )
-                await query.edit_message_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                await render_participant_result_screen(query, comp.id, participant.id, lang, name)
                 return
             else:
                 # Results pending
-                sub_text = get_text("exam_submitted", lang)
-                await query.edit_message_text(sub_text, reply_markup=get_main_menu_keyboard(lang), parse_mode=ParseMode.MARKDOWN)
+                text = get_text("results_pending_notice", lang)
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
                 return
 
         # 4. No attempt yet -> Show competition summary and Start Competition button
@@ -948,3 +966,150 @@ async def cb_review_answers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup=get_main_menu_keyboard(lang),
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+async def render_participant_result_screen(
+    target: Any,
+    competition_id: uuid.UUID,
+    participant_id: uuid.UUID,
+    lang: str,
+    user_display_name: str,
+) -> None:
+    """Renders the official personal result screen for a participant strictly guarded by publication status."""
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, competition_id)
+        if not comp or comp.status != CompetitionStatus.PUBLISHED:
+            text = get_text("results_pending_notice", lang)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+            if hasattr(target, "edit_message_text"):
+                await target.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await target.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            return
+
+        result_data = await ScoringAndRankingService.get_participant_result(db, competition_id, participant_id)
+        if not result_data:
+            text = get_text("results_pending_notice", lang)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+            if hasattr(target, "edit_message_text"):
+                await target.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await target.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            return
+
+        total_q = result_data["total_questions"]
+        score = result_data["score"]
+        percent = round((score / total_q) * 100, 1) if total_q else 0
+        total_participants = result_data.get("total_participants") or 1
+
+        res_text = get_text(
+            "results_title",
+            lang,
+            title=comp.title,
+            full_name=user_display_name,
+            score=score,
+            total=total_q,
+            percent=percent,
+            rank=result_data["rank"],
+            total_participants=total_participants,
+            time=result_data["completion_time"],
+        )
+        kb = get_results_keyboard(comp.id, lang=lang)
+        if hasattr(target, "edit_message_text"):
+            await target.edit_message_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await target.reply_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cb_participant_my_result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles 'My Result' action or 'Back to My Result' navigation."""
+    query = update.callback_query
+    await query.answer()
+    user = update.effective_user
+    lang = await get_user_lang(user.id)
+    comp_id = uuid.UUID(query.data.split(":")[2])
+    name = get_participant_display_name(update)
+
+    async with AsyncSessionLocal() as db:
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not participant:
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
+            return
+        p_id = participant.id
+
+    await render_participant_result_screen(query, comp_id, p_id, lang, name)
+
+
+async def cb_participant_answer_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles 1-question-at-a-time post-exam answer review screen."""
+    query = update.callback_query
+    await query.answer()
+    user = update.effective_user
+    lang = await get_user_lang(user.id)
+    parts = query.data.split(":")
+    comp_id = uuid.UUID(parts[2])
+    display_order = int(parts[3])
+
+    async with AsyncSessionLocal() as db:
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not participant:
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
+            return
+
+        try:
+            data = await ScoringAndRankingService.get_answer_review_question(
+                db, comp_id, participant.id, display_order
+            )
+        except ResultsNotPublishedError:
+            notice_text = get_text("results_pending_notice", lang)
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+            await query.edit_message_text(notice_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            return
+        except CompetitionError as e:
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+            await query.edit_message_text(str(e), reply_markup=kb)
+            return
+
+    # Build 1-question-at-a-time review presentation
+    total_q = data["total_questions"]
+    q_text = data["question_text"]
+    options = data["options"]  # {"A": text, "B": text, ...}
+
+    opt_lines = []
+    for letter in sorted(options.keys()):
+        opt_lines.append(f"*{letter}.* {options[letter]}")
+    options_formatted = "\n".join(opt_lines)
+
+    if data["unanswered"] or not data["user_selected_display"]:
+        user_ans_str = get_text("review_not_answered", lang)
+        result_str = get_text("review_not_answered", lang)
+    else:
+        user_letter = data["user_selected_display"]
+        user_text = data["user_selected_text"]
+        user_ans_str = f"*{user_letter}.* {user_text}"
+        if data["is_correct"]:
+            result_str = get_text("review_correct", lang, points=1)
+        else:
+            result_str = get_text("review_incorrect", lang)
+
+    correct_letter = data["correct_display_option"]
+    correct_text = data["correct_answer_text"]
+    correct_ans_str = f"*{correct_letter}.* {correct_text}"
+
+    review_body = (
+        f"📖 *Question {data['display_order']} of {total_q}*\n\n"
+        f"*{q_text}*\n\n"
+        f"{options_formatted}\n\n"
+        f"{get_text('review_your_answer', lang)} {user_ans_str}\n"
+        f"{get_text('review_correct_answer', lang)} {correct_ans_str}\n"
+        f"{get_text('review_result_label', lang)} {result_str}"
+    )
+
+    kb = get_answer_review_nav_keyboard(comp_id, display_order, total_q, lang=lang)
+    try:
+        await query.edit_message_text(review_body, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.warning(f"Error rendering answer review markdown: {e}")
+        plain = review_body.replace("*", "").replace("_", "").replace("`", "")
+        await query.edit_message_text(plain, reply_markup=kb)
+

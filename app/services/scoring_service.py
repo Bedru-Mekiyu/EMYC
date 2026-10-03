@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -174,15 +174,122 @@ class ScoringAndRankingService:
         minutes, secs = divmod(seconds, 60)
         formatted_time = f"{minutes:02d}:{secs:02d}"
 
+        # Total ranked participants in this competition
+        tot_stmt = select(func.count(ExamAttempt.id)).where(
+            and_(
+                ExamAttempt.competition_id == competition_id,
+                ExamAttempt.status == AttemptStatus.FINALIZED,
+            )
+        )
+        total_participants = (await db.execute(tot_stmt)).scalar() or 1
+
         return {
             "competition_id": comp.id,
             "competition_title": comp.title,
             "score": attempt.score,
             "total_questions": comp.question_count,
             "rank": attempt.rank,
+            "total_participants": total_participants,
             "completion_time": formatted_time,
             "correct_count": attempt.correct_count,
             "incorrect_count": attempt.incorrect_count,
+        }
+
+    @staticmethod
+    async def get_answer_review_question(
+        db: AsyncSession,
+        competition_id: uuid.UUID,
+        participant_id: uuid.UUID,
+        display_order: int,
+    ) -> Dict[str, Any]:
+        """Fetches 1 question for post-publication review in the participant's exact personalized order.
+        STRICTLY BLOCKED until competition is PUBLISHED.
+        Scoped strictly by competition_id + participant_id.
+        """
+        comp = await db.get(Competition, competition_id)
+        if not comp:
+            raise CompetitionError("Competition not found")
+
+        if comp.status != CompetitionStatus.PUBLISHED:
+            raise ResultsNotPublishedError("Answer reviews are shielded until official results publication")
+
+        stmt = select(ExamAttempt).where(
+            and_(
+                ExamAttempt.competition_id == competition_id,
+                ExamAttempt.participant_id == participant_id,
+            )
+        )
+        res = await db.execute(stmt)
+        attempt = res.scalar_one_or_none()
+        if not attempt:
+            raise CompetitionError("No attempt found for this participant")
+
+        # 1. Total questions for this attempt
+        tot_q_stmt = select(func.count(AttemptQuestionOrder.id)).where(
+            AttemptQuestionOrder.attempt_id == attempt.id
+        )
+        total_questions = (await db.execute(tot_q_stmt)).scalar() or comp.question_count
+
+        # 2. Get the specific question in the participant's personal display order
+        order_stmt = (
+            select(AttemptQuestionOrder)
+            .options(selectinload(AttemptQuestionOrder.question))
+            .where(
+                and_(
+                    AttemptQuestionOrder.attempt_id == attempt.id,
+                    AttemptQuestionOrder.display_order == display_order,
+                )
+            )
+        )
+        order_entry = (await db.execute(order_stmt)).scalar_one_or_none()
+        if not order_entry:
+            raise CompetitionError(f"Question order {display_order} not found for this attempt")
+
+        q = order_entry.question
+        canonical_options = q.options  # {"A": "text A", "B": "text B", ...}
+
+        # Build displayed options dictionary: {"A": text, "B": text, ...}
+        displayed_options = {}
+        display_correct_letter = None
+        for d_letter, c_letter in order_entry.option_mapping.items():
+            displayed_options[d_letter] = canonical_options.get(c_letter, "")
+            if c_letter == q.correct_option:
+                display_correct_letter = d_letter
+
+        # 3. Fetch participant's answer for this question if exists
+        ans_stmt = select(ParticipantAnswer).where(
+            and_(
+                ParticipantAnswer.attempt_id == attempt.id,
+                ParticipantAnswer.question_id == q.id,
+            )
+        )
+        ans = (await db.execute(ans_stmt)).scalar_one_or_none()
+
+        if ans:
+            user_selected_display = ans.selected_display_option
+            user_selected_text = displayed_options.get(user_selected_display, "")
+            is_correct = ans.is_correct
+            unanswered = False
+        else:
+            user_selected_display = None
+            user_selected_text = None
+            is_correct = False
+            unanswered = True
+
+        correct_answer_text = displayed_options.get(display_correct_letter or q.correct_option, "")
+
+        return {
+            "competition_title": comp.title,
+            "display_order": display_order,
+            "total_questions": total_questions,
+            "question_text": q.question_text,
+            "options": displayed_options,
+            "user_selected_display": user_selected_display,
+            "user_selected_text": user_selected_text,
+            "correct_display_option": display_correct_letter or q.correct_option,
+            "correct_answer_text": correct_answer_text,
+            "is_correct": is_correct,
+            "unanswered": unanswered,
         }
 
     @staticmethod

@@ -1,7 +1,7 @@
 """Production lifecycle, administrative control panel, and participant resumption tests."""
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -40,10 +40,13 @@ from app.bot.handlers.participant import (
     cb_answer,
     handle_text_message,
 )
+from app.models.attempt import ExamAttempt, AttemptStatus, AttemptQuestionOrder, ParticipantAnswer
 from app.services.competition_service import CompetitionService
 from app.services.membership_service import ParticipantService, MockMembershipVerificationService
+from app.services.scoring_service import ScoringAndRankingService, ResultsNotPublishedError
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.time_utils import now_utc
 
 
 @pytest.mark.asyncio
@@ -1386,6 +1389,301 @@ async def test_participant_review_answers_and_bidirectional_navigation(db_sessio
     assert f"q:nav:{attempt.id}:2" in jump_callbacks
     assert f"q:nav:{attempt.id}:3" in jump_callbacks
     assert f"exam:submit:{attempt.id}" in jump_callbacks
+
+
+@pytest.mark.asyncio
+async def test_admin_results_db_level_aggregation(db_session: AsyncSession):
+    """Verifies that cb_admin_results executes DB-level aggregation without fetching all attempt models."""
+    from app.bot.handlers.admin import cb_admin_results
+
+    admin_user = MagicMock(spec=User)
+    admin_user.id = 999999
+    admin_user.first_name = "Admin"
+
+    # Setup competition
+    now = now_utc()
+    comp = Competition(
+        title="Aggregate Statistics Comp",
+        status=CompetitionStatus.CLOSED,
+        opens_at=now - timedelta(hours=3),
+        closes_at=now - timedelta(hours=1),
+        duration_minutes=60,
+        question_count=10,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+    await db_session.refresh(comp)
+
+    # Add 4 participants
+    p_ids = []
+    for i in range(4):
+        p = Participant(
+            telegram_user_id=88000 + i,
+            membership_id=f"EMYC-AGG-{i}",
+            telegram_username=f"participant_{i}",
+            language_code="en",
+        )
+        db_session.add(p)
+        await db_session.commit()
+        await db_session.refresh(p)
+        p_ids.append(p.id)
+
+    # 1 Submitted (score 90)
+    att1 = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=p_ids[0],
+        status=AttemptStatus.SUBMITTED,
+        score=90,
+        started_at=now - timedelta(hours=2),
+        submitted_at=now - timedelta(hours=1, minutes=30),
+        deadline_at=now - timedelta(hours=1),
+    )
+    # 1 Submitted (score 70)
+    att2 = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=p_ids[1],
+        status=AttemptStatus.SUBMITTED,
+        score=70,
+        started_at=now - timedelta(hours=2),
+        submitted_at=now - timedelta(hours=1, minutes=40),
+        deadline_at=now - timedelta(hours=1),
+    )
+    # 1 In Progress
+    att3 = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=p_ids[2],
+        status=AttemptStatus.IN_PROGRESS,
+        score=0,
+        started_at=now - timedelta(minutes=30),
+        deadline_at=now + timedelta(minutes=30),
+    )
+    # 1 Expired (score 40)
+    att4 = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=p_ids[3],
+        status=AttemptStatus.EXPIRED,
+        score=40,
+        started_at=now - timedelta(hours=2),
+        deadline_at=now - timedelta(hours=1),
+    )
+    db_session.add_all([att1, att2, att3, att4])
+    await db_session.commit()
+
+    query = MagicMock()
+    query.data = "admin:results"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    update.callback_query = query
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_user.id}"
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    await cb_admin_results(update, context)
+
+    query.edit_message_text.assert_called_once()
+    dash_text = query.edit_message_text.call_args[0][0]
+
+    assert "Competition Results" in dash_text
+    assert "Registered:* 4" in dash_text
+    assert "Started:* 4" in dash_text
+    assert "In Progress:* 1" in dash_text
+    assert "Completed:* 2" in dash_text
+    assert "Expired:* 1" in dash_text
+    assert "Completion Rate:* 50.0%" in dash_text
+    assert "Top Score:* 90" in dash_text
+
+
+@pytest.mark.asyncio
+async def test_strict_publication_gate_and_1_question_review_flow(db_session: AsyncSession):
+    """Verifies server-side publication gate and 1-question-at-a-time answer review navigation."""
+    from app.bot.handlers.participant import (
+        cb_participant_answer_review,
+        cb_participant_my_result,
+    )
+
+    now = now_utc()
+    comp = Competition(
+        title="Publication Gate Review Comp",
+        status=CompetitionStatus.CLOSED,  # CLOSED, not yet PUBLISHED
+        opens_at=now - timedelta(hours=2),
+        closes_at=now - timedelta(hours=1),
+        duration_minutes=60,
+        question_count=2,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+    await db_session.refresh(comp)
+
+    # Questions
+    q1 = CompetitionQuestion(
+        competition_id=comp.id,
+        order_index=1,
+        question_text="First question text?",
+        options={"A": "Alpha", "B": "Beta", "C": "Gamma", "D": "Delta"},
+        correct_option="B",
+    )
+    q2 = CompetitionQuestion(
+        competition_id=comp.id,
+        order_index=2,
+        question_text="Second question text?",
+        options={"A": "One", "B": "Two", "C": "Three", "D": "Four"},
+        correct_option="A",
+    )
+    db_session.add_all([q1, q2])
+    await db_session.commit()
+    await db_session.refresh(q1)
+    await db_session.refresh(q2)
+
+    # Participant & Attempt
+    p_user = MagicMock(spec=User)
+    p_user.id = 771122
+    p_user.first_name = "Khadija"
+
+    p = Participant(
+        telegram_user_id=p_user.id,
+        membership_id="EMYC-REV-01",
+        telegram_username="khadija_a",
+        language_code="en",
+    )
+    db_session.add(p)
+    await db_session.commit()
+    await db_session.refresh(p)
+
+    attempt = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=p.id,
+        status=AttemptStatus.SUBMITTED,
+        score=1,
+        rank=1,
+        started_at=now - timedelta(minutes=50),
+        submitted_at=now - timedelta(minutes=20),
+        deadline_at=now + timedelta(minutes=10),
+    )
+    db_session.add(attempt)
+    await db_session.commit()
+    await db_session.refresh(attempt)
+
+    # Question order entries
+    ord1 = AttemptQuestionOrder(
+        attempt_id=attempt.id,
+        question_id=q1.id,
+        display_order=1,
+        option_mapping={"A": "A", "B": "B", "C": "C", "D": "D"},
+    )
+    ord2 = AttemptQuestionOrder(
+        attempt_id=attempt.id,
+        question_id=q2.id,
+        display_order=2,
+        option_mapping={"A": "A", "B": "B", "C": "C", "D": "D"},
+    )
+    db_session.add_all([ord1, ord2])
+
+    # Participant answered Q1 correctly (B) and left Q2 unanswered
+    ans1 = ParticipantAnswer(
+        attempt_id=attempt.id,
+        question_id=q1.id,
+        selected_display_option="B",
+        resolved_canonical_option="B",
+        is_correct=True,
+    )
+    db_session.add(ans1)
+    await db_session.commit()
+
+    # 1. Verification of Publication Gate while CLOSED -> must raise ResultsNotPublishedError
+    with pytest.raises(ResultsNotPublishedError):
+        await ScoringAndRankingService.get_answer_review_question(db_session, comp.id, p.id, display_order=1)
+
+    # Handler call while CLOSED should show results_pending_notice
+    query = MagicMock()
+    query.data = f"rev:q:{comp.id}:1"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+
+    update = MagicMock(spec=Update)
+    update.effective_user = p_user
+    update.callback_query = query
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    await cb_participant_answer_review(update, context)
+    query.edit_message_text.assert_called_once()
+    pending_notice = query.edit_message_text.call_args[0][0]
+    assert "Results Pending" in pending_notice
+
+    # 2. Now transition competition to PUBLISHED
+    comp.status = CompetitionStatus.PUBLISHED
+    await db_session.commit()
+
+    # 3. Test Question 1 Review (Answered Correctly)
+    query_q1 = MagicMock()
+    query_q1.data = f"rev:q:{comp.id}:1"
+    query_q1.answer = AsyncMock()
+    query_q1.edit_message_text = AsyncMock()
+    update_q1 = MagicMock(spec=Update)
+    update_q1.effective_user = p_user
+    update_q1.callback_query = query_q1
+
+    await cb_participant_answer_review(update_q1, context)
+    query_q1.edit_message_text.assert_called_once()
+    q1_text = query_q1.edit_message_text.call_args[0][0]
+    assert "Question 1 of 2" in q1_text
+    assert "First question text?" in q1_text
+    assert "Your Answer:* *B.* Beta" in q1_text
+    assert "Correct Answer:* *B.* Beta" in q1_text
+    assert "Result:* ✅ Correct (+1 pts)" in q1_text
+
+    # Verify navigation keyboard on Question 1 (no prev button on Q1, has Next button)
+    kb1 = query_q1.edit_message_text.call_args[1]["reply_markup"]
+    nav_callbacks = [b.callback_data for row in kb1.inline_keyboard for b in row]
+    assert f"rev:q:{comp.id}:2" in nav_callbacks
+    assert f"rev:my_result:{comp.id}" in nav_callbacks
+    assert "menu:home" in nav_callbacks
+
+    # 4. Test Question 2 Review (Unanswered)
+    query_q2 = MagicMock()
+    query_q2.data = f"rev:q:{comp.id}:2"
+    query_q2.answer = AsyncMock()
+    query_q2.edit_message_text = AsyncMock()
+    update_q2 = MagicMock(spec=Update)
+    update_q2.effective_user = p_user
+    update_q2.callback_query = query_q2
+
+    await cb_participant_answer_review(update_q2, context)
+    query_q2.edit_message_text.assert_called_once()
+    q2_text = query_q2.edit_message_text.call_args[0][0]
+    assert "Question 2 of 2" in q2_text
+    assert "Second question text?" in q2_text
+    assert "Your Answer:* ⚪ Not answered" in q2_text
+    assert "Correct Answer:* *A.* One" in q2_text
+    assert "Result:* ⚪ Not answered (0 pts)" in q2_text
+
+    # Verify navigation keyboard on Question 2 (has Prev button, no Next button on last Q)
+    kb2 = query_q2.edit_message_text.call_args[1]["reply_markup"]
+    nav2_callbacks = [b.callback_data for row in kb2.inline_keyboard for b in row]
+    assert f"rev:q:{comp.id}:1" in nav2_callbacks
+    assert f"rev:my_result:{comp.id}" in nav2_callbacks
+    assert "menu:home" in nav2_callbacks
+
+    # 5. Test Back to My Result via cb_participant_my_result
+    query_res = MagicMock()
+    query_res.data = f"rev:my_result:{comp.id}"
+    query_res.answer = AsyncMock()
+    query_res.edit_message_text = AsyncMock()
+    update_res = MagicMock(spec=Update)
+    update_res.effective_user = p_user
+    update_res.callback_query = query_res
+
+    await cb_participant_my_result(update_res, context)
+    query_res.edit_message_text.assert_called_once()
+    my_res_text = query_res.edit_message_text.call_args[0][0]
+    assert "EMYC Competition Results" in my_res_text
+    assert "Score:* 1 / 2 (50.0%)" in my_res_text
+    assert "Rank:* #1 of 1" in my_res_text
+    res_kb = query_res.edit_message_text.call_args[1]["reply_markup"]
+    res_callbacks = [b.callback_data for row in res_kb.inline_keyboard for b in row]
+    assert f"rev:q:{comp.id}:1" in res_callbacks
+    assert "menu:home" in res_callbacks
+
 
 
 

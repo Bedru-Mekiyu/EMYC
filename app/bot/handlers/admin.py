@@ -4,7 +4,7 @@ from typing import Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
@@ -469,19 +469,24 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Registration metrics
         total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
 
-        # Attempt metrics for this competition
-        attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
-        attempts = list((await db.execute(attempts_stmt)).scalars().all())
+        # Database-level aggregate metrics for this competition (loads ZERO attempt ORM instances into Python memory)
+        agg_stmt = select(
+            func.count(ExamAttempt.id).label("started"),
+            func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("completed"),
+            func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))).label("in_progress"),
+            func.count(case((ExamAttempt.status == AttemptStatus.EXPIRED, 1))).label("expired"),
+            func.max(ExamAttempt.score).label("highest_score"),
+        ).where(ExamAttempt.competition_id == comp.id)
 
-        started = len(attempts)
-        submitted = sum(1 for a in attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
-        in_progress = sum(1 for a in attempts if a.status == AttemptStatus.IN_PROGRESS)
-        expired = sum(1 for a in attempts if a.status == AttemptStatus.EXPIRED)
+        agg_res = (await db.execute(agg_stmt)).one()
+        started = agg_res.started or 0
+        submitted = agg_res.completed or 0
+        in_progress = agg_res.in_progress or 0
+        expired = agg_res.expired or 0
+        highest_score = agg_res.highest_score
 
         completion_pct = round((submitted / started) * 100, 1) if started > 0 else 0.0
-
-        finished_scores = [a.score for a in attempts if a.score is not None]
-        top_score_val = f"{max(finished_scores)}/{comp.question_count}" if finished_scores else "N/A"
+        top_score_val = f"{highest_score}/{comp.question_count}" if highest_score is not None else "N/A"
 
     dash_text = get_text(
         "admin_results_dash",

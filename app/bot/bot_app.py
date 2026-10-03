@@ -22,6 +22,8 @@ from app.bot.handlers.participant import (
     cb_exam_review,
     cb_submit_exam,
     cb_review_answers,
+    cb_participant_my_result,
+    cb_participant_answer_review,
     handle_text_message,
 )
 from app.bot.handlers.admin import (
@@ -84,7 +86,9 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_question_nav, pattern="^q:nav:"))
     app.add_handler(CallbackQueryHandler(cb_exam_review, pattern="^q:rev_all:"))
     app.add_handler(CallbackQueryHandler(cb_submit_exam, pattern="^exam:submit:"))
-    app.add_handler(CallbackQueryHandler(cb_review_answers, pattern="^rev:"))
+    app.add_handler(CallbackQueryHandler(cb_participant_answer_review, pattern="^rev:q:"))
+    app.add_handler(CallbackQueryHandler(cb_participant_my_result, pattern="^rev:my_result:"))
+    app.add_handler(CallbackQueryHandler(cb_review_answers, pattern="^rev:(correct|incorrect):"))
 
     # Admin Callback Queries
     app.add_handler(CallbackQueryHandler(cmd_admin, pattern="^admin:home$"))
