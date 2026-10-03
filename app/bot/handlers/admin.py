@@ -28,6 +28,9 @@ from app.bot.keyboards import (
     get_admin_create_comp_duration_keyboard,
     get_admin_create_comp_schedule_keyboard,
     get_admin_create_comp_questions_keyboard,
+    get_admin_question_correct_choice_keyboard,
+    get_admin_question_preview_keyboard,
+    get_admin_question_list_keyboard,
 )
 from app.scripts.seed_questions import SAMPLE_QUESTIONS
 
@@ -175,13 +178,21 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
             buttons.append([InlineKeyboardButton("🟢 Open Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-            buttons.append([InlineKeyboardButton("📝 Add Question to Competition", callback_data=f"admin:add_q:{comp.id}")])
+            buttons.append([
+                InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
+                InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
+            ])
+            buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
         elif comp.status == CompetitionStatus.LIVE:
             buttons.append([InlineKeyboardButton("🔴 Close Competition (Set CLOSED)", callback_data=f"admin:set_closed:{comp.id}")])
         elif comp.status == CompetitionStatus.CLOSED:
             buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])
+            buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
         elif comp.status == CompetitionStatus.RESULTS_FINALIZED:
             buttons.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp.id}")])
+            buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
+        elif comp.status == CompetitionStatus.PUBLISHED:
+            buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         buttons.append([
             InlineKeyboardButton("➕ Create New Competition", callback_data="admin:create_comp:start"),
@@ -551,9 +562,13 @@ async def cb_admin_participants(update: Update, context: ContextTypes.DEFAULT_TY
 
 @require_admin
 async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Dedicated leaderboard inspection screen."""
+    """Dedicated leaderboard inspection screen with pagination support."""
     query = update.callback_query
     await query.answer()
+
+    parts = query.data.split(":")
+    page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
+    page_size = 10
 
     async with AsyncSessionLocal() as db:
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
@@ -566,6 +581,13 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
+        # Total attempts count for pagination
+        count_stmt = select(func.count(ExamAttempt.id)).where(ExamAttempt.competition_id == comp.id)
+        total_attempts = (await db.execute(count_stmt)).scalar() or 0
+        total_pages = max(1, (total_attempts + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * page_size
+
         attempts_stmt = (
             select(ExamAttempt)
             .options(selectinload(ExamAttempt.participant))
@@ -575,7 +597,8 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 ExamAttempt.score.desc().nulls_last(),
                 ExamAttempt.completion_seconds.asc().nulls_last(),
             )
-            .limit(10)
+            .offset(offset)
+            .limit(page_size)
         )
         attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
@@ -583,14 +606,15 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     header = (
         f"🏅 *EMYC Competition Leaderboard*\n\n"
         f"*Competition:* {comp.title} ({status_tag})\n"
-        f"*Total Questions:* {comp.question_count}\n\n"
+        f"*Total Questions:* {comp.question_count}\n"
+        f"*Total Entries:* {total_attempts} | Page {page} of {total_pages}\n\n"
     )
 
     if not attempts:
         body = "_No participant attempts recorded yet for this competition._"
     else:
         rows = []
-        for idx, att in enumerate(attempts, start=1):
+        for idx, att in enumerate(attempts, start=offset + 1):
             rank_display = f"#{att.rank}" if att.rank else f"#{idx}"
             p_name = "Participant"
             if att.participant:
@@ -605,7 +629,7 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     text = f"{header}{body}"
     await query.edit_message_text(
         text,
-        reply_markup=get_admin_rankings_keyboard("en"),
+        reply_markup=get_admin_rankings_keyboard("en", page=page, total_pages=total_pages),
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -787,18 +811,252 @@ async def cb_admin_create_questions(update: Update, context: ContextTypes.DEFAUL
 
 @require_admin
 async def cb_admin_add_question_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Prompts admin to enter a question for the draft competition."""
+    """Begins the interactive step-by-step question authoring wizard."""
     query = update.callback_query
     await query.answer()
     comp_id_str = query.data.split(":")[2]
-    context.user_data["awaiting_question_comp_id"] = uuid.UUID(comp_id_str)
+    comp_id = uuid.UUID(comp_id_str)
+    context.user_data["q_wizard"] = {"comp_id": comp_id, "step": "text"}
+    context.user_data["awaiting_question_comp_id"] = comp_id
 
     text = (
-        "📝 *Add Question to Competition*\n\n"
-        "Please type the question and 4 choices in this chat separated by vertical bars (`|`):\n\n"
-        "`Question text? | Option A | Option B | Option C | Option D | Correct Letter (A, B, C, or D)`\n\n"
-        "*Example:*\n"
-        "`What is the capital of Ethiopia? | Addis Ababa | Hawassa | Mekelle | Bahir Dar | A`"
+        "📝 *Add Question (Step 1/5: Question Text)*\n\n"
+        "Please type the *Question Text* in this chat.\n\n"
+        "💡 _Shortcut: You can also send the entire question on one line:_\n"
+        "`Question text? | Option A | Option B | Option C | Option D | A`"
     )
-    cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")]])
+    cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin:q_wiz_cancel")]])
     await query.edit_message_text(text, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_q_wiz_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Captures correct option selection and renders full question preview."""
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split(":")[2]  # "A", "B", "C", "D"
+
+    wizard = context.user_data.get("q_wizard")
+    if not wizard:
+        await query.edit_message_text(
+            "⚠️ Question creation session expired.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
+        )
+        return
+
+    wizard["correct"] = choice
+    wizard["step"] = "preview"
+    comp_id = wizard["comp_id"]
+
+    preview_text = (
+        "🔍 *Question Preview & Confirmation*\n\n"
+        f"*{wizard.get('text', '')}*\n\n"
+        f"A) {wizard.get('opt_a', '')}\n"
+        f"B) {wizard.get('opt_b', '')}\n"
+        f"C) {wizard.get('opt_c', '')}\n"
+        f"D) {wizard.get('opt_d', '')}\n\n"
+        f"✅ *Correct Answer:* Option *{choice}*\n\n"
+        f"Would you like to save this question to the competition?"
+    )
+    await query.edit_message_text(
+        preview_text,
+        reply_markup=get_admin_question_preview_keyboard(comp_id),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+@require_admin
+async def cb_admin_q_wiz_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Persists validated question from wizard into database and updates question count."""
+    query = update.callback_query
+    await query.answer("Saving question...", show_alert=False)
+    comp_id_str = query.data.split(":")[2]
+    comp_id = uuid.UUID(comp_id_str)
+
+    wizard = context.user_data.pop("q_wizard", None)
+    context.user_data.pop("awaiting_question_comp_id", None)
+
+    if not wizard or "text" not in wizard or "correct" not in wizard:
+        await query.edit_message_text(
+            "⚠️ Question creation session expired or invalid.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
+        )
+        return
+
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, comp_id)
+        if not comp:
+            await query.edit_message_text("❌ Competition not found.", reply_markup=get_admin_keyboard("en"))
+            return
+
+        if comp.status not in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+            await query.edit_message_text(
+                f"❌ Cannot add questions to competition with status `{comp.status}`.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
+            )
+            return
+
+        cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp_id)
+        current_q_count = (await db.execute(cnt_stmt)).scalar() or 0
+        next_order = current_q_count + 1
+
+        options = {
+            "A": wizard.get("opt_a", ""),
+            "B": wizard.get("opt_b", ""),
+            "C": wizard.get("opt_c", ""),
+            "D": wizard.get("opt_d", ""),
+        }
+
+        q = CompetitionQuestion(
+            competition_id=comp.id,
+            question_text=wizard["text"],
+            options=options,
+            correct_option=wizard["correct"],
+            order_index=next_order,
+        )
+        db.add(q)
+        comp.question_count = next_order
+        await db.commit()
+
+    text = (
+        f"✅ *Question #{next_order} Saved Successfully!*\n\n"
+        f"*{wizard['text']}*\n"
+        f"A) {options['A']}\nB) {options['B']}\nC) {options['C']}\nD) {options['D']}\n"
+        f"Correct: *Option {wizard['correct']}*\n\n"
+        f"Total questions in competition: *{next_order}*"
+    )
+    buttons = [
+        [InlineKeyboardButton("➕ Add Another Question", callback_data=f"admin:add_q:{comp_id}")],
+        [InlineKeyboardButton(f"📋 Manage Questions ({next_order})", callback_data=f"admin:q_list:{comp_id}:1")],
+        [InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_q_wiz_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancels question creation wizard."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("q_wizard", None)
+    context.user_data.pop("awaiting_question_comp_id", None)
+    await query.edit_message_text(
+        "❌ Question authoring cancelled.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
+    )
+
+
+@require_admin
+async def cb_admin_q_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays paginated question listing with deletion controls."""
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split(":")
+    comp_id = uuid.UUID(parts[2])
+    page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 1
+    page_size = 5
+
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, comp_id)
+        if not comp:
+            await query.edit_message_text("❌ Competition not found.", reply_markup=get_admin_keyboard("en"))
+            return
+
+        cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp_id)
+        total_q = (await db.execute(cnt_stmt)).scalar() or 0
+        total_pages = max(1, (total_q + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * page_size
+
+        q_stmt = (
+            select(CompetitionQuestion)
+            .where(CompetitionQuestion.competition_id == comp_id)
+            .order_by(CompetitionQuestion.order_index.asc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        questions = list((await db.execute(q_stmt)).scalars().all())
+
+    header = (
+        f"📋 *Manage Questions: {comp.title}*\n\n"
+        f"Total Questions: *{total_q}* | Page {page} of {total_pages}\n\n"
+    )
+
+    if not questions:
+        body = "_No questions configured for this competition yet._"
+    else:
+        rows = []
+        for q in questions:
+            rows.append(
+                f"*{q.order_index}.* {q.question_text}\n"
+                f"   [A: {q.options.get('A', '')} | B: {q.options.get('B', '')} | "
+                f"C: {q.options.get('C', '')} | D: {q.options.get('D', '')}]\n"
+                f"   *Answer:* `{q.correct_option}`"
+            )
+        body = "\n\n".join(rows)
+
+    text = f"{header}{body}"
+    kb = get_admin_question_list_keyboard(comp_id, page, total_pages, questions)
+    await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+
+
+@require_admin
+async def cb_admin_q_del(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Deletes a question and re-indexes remaining questions."""
+    query = update.callback_query
+    await query.answer("Deleting question...", show_alert=False)
+
+    parts = query.data.split(":")
+    comp_id = uuid.UUID(parts[2])
+    q_id = uuid.UUID(parts[3])
+
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, comp_id)
+        if not comp or comp.status not in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+            await query.answer("Cannot delete questions on active or closed competitions.", show_alert=True)
+            return
+
+        question = await db.get(CompetitionQuestion, q_id)
+        if question:
+            await db.delete(question)
+            await db.flush()
+
+        # Re-index remaining questions
+        q_stmt = (
+            select(CompetitionQuestion)
+            .where(CompetitionQuestion.competition_id == comp_id)
+            .order_by(CompetitionQuestion.order_index.asc())
+        )
+        remaining = list((await db.execute(q_stmt)).scalars().all())
+        for idx, q in enumerate(remaining, start=1):
+            q.order_index = idx
+        comp.question_count = len(remaining)
+        await db.commit()
+
+    # Re-render question list page 1
+    query.data = f"admin:q_list:{comp_id}:1"
+    await cb_admin_q_list(update, context)
+
+
+@require_admin
+async def cb_admin_archive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Archives a competition."""
+    query = update.callback_query
+    await query.answer()
+
+    comp_id = uuid.UUID(query.data.split(":")[2])
+    async with AsyncSessionLocal() as db:
+        try:
+            await CompetitionService.update_status(
+                db, comp_id, CompetitionStatus.ARCHIVED, admin_id=str(update.effective_user.id)
+            )
+            await query.edit_message_text(
+                "📦 *Competition Archived Successfully!*\n\n"
+                "The competition status is now `ARCHIVED` and is closed to participants.",
+                reply_markup=get_admin_keyboard("en"),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except CompetitionError as e:
+            await query.edit_message_text(f"❌ Error archiving competition: {str(e)}", reply_markup=get_admin_keyboard("en"))
+

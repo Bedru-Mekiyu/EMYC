@@ -313,60 +313,133 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 return
 
-    # Case C: Admin interactive question addition
-    if context.user_data.get("awaiting_question_comp_id"):
+    # Case C: Admin interactive question authoring wizard (5 steps)
+    if context.user_data.get("q_wizard") or context.user_data.get("awaiting_question_comp_id"):
         from app.core.config import get_settings
         if get_settings().is_admin(user.id):
-            comp_id = context.user_data.pop("awaiting_question_comp_id")
-            parts = [p.strip() for p in text.split("|")]
-            if len(parts) >= 6:
-                q_text = parts[0]
-                options = {
-                    "A": parts[1].removeprefix("A)").removeprefix("A.").strip(),
-                    "B": parts[2].removeprefix("B)").removeprefix("B.").strip(),
-                    "C": parts[3].removeprefix("C)").removeprefix("C.").strip(),
-                    "D": parts[4].removeprefix("D)").removeprefix("D.").strip(),
-                }
-                correct = parts[5].strip().upper()
-                if correct in ["A", "B", "C", "D"]:
-                    async with AsyncSessionLocal() as db:
-                        comp = await db.get(Competition, comp_id)
-                        if comp and comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
-                            next_order = comp.question_count + 1
-                            q = CompetitionQuestion(
-                                competition_id=comp.id,
-                                question_text=q_text,
-                                options=options,
-                                correct_option=correct,
-                                order_index=next_order,
-                            )
-                            db.add(q)
-                            comp.question_count = next_order
-                            await db.commit()
+            if "q_wizard" not in context.user_data:
+                comp_id = context.user_data["awaiting_question_comp_id"]
+                context.user_data["q_wizard"] = {"comp_id": comp_id, "step": "text"}
+            wizard = context.user_data["q_wizard"]
+            step = wizard.get("step")
+            comp_id = wizard.get("comp_id")
 
-                            kb = InlineKeyboardMarkup([
-                                [InlineKeyboardButton("➕ Add Another Question", callback_data=f"admin:add_q:{comp.id}")],
-                                [InlineKeyboardButton("⚙️ Back to Competition", callback_data="admin:competition")],
-                            ])
-                            await update.message.reply_text(
-                                f"✅ *Question #{next_order} Added Successfully!*\n\n"
-                                f"*{q_text}*\n"
-                                f"A) {options['A']}\nB) {options['B']}\nC) {options['C']}\nD) {options['D']}\n"
-                                f"Correct: *{correct}*",
-                                reply_markup=kb,
-                                parse_mode=ParseMode.MARKDOWN,
-                            )
-                            return
+            # Check if admin provided all-in-one shortcut format
+            if "|" in text:
+                parts = [p.strip() for p in text.split("|")]
+                if len(parts) >= 6:
+                    q_text = parts[0]
+                    opt_a = parts[1].removeprefix("A)").removeprefix("A.").strip()
+                    opt_b = parts[2].removeprefix("B)").removeprefix("B.").strip()
+                    opt_c = parts[3].removeprefix("C)").removeprefix("C.").strip()
+                    opt_d = parts[4].removeprefix("D)").removeprefix("D.").strip()
+                    correct = parts[5].strip().upper()
+                    if correct in ["A", "B", "C", "D"]:
+                        context.user_data.pop("q_wizard", None)
+                        context.user_data.pop("awaiting_question_comp_id", None)
+                        options = {"A": opt_a, "B": opt_b, "C": opt_c, "D": opt_d}
+                        async with AsyncSessionLocal() as db:
+                            comp = await db.get(Competition, comp_id)
+                            if comp and comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+                                cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp.id)
+                                current_q_count = (await db.execute(cnt_stmt)).scalar() or 0
+                                next_order = current_q_count + 1
+                                q = CompetitionQuestion(
+                                    competition_id=comp.id,
+                                    question_text=q_text,
+                                    options=options,
+                                    correct_option=correct,
+                                    order_index=next_order,
+                                )
+                                db.add(q)
+                                comp.question_count = next_order
+                                await db.commit()
 
-            # Invalid question format fallback
-            context.user_data["awaiting_question_comp_id"] = comp_id
-            await update.message.reply_text(
-                "⚠️ *Invalid question format!*\n\n"
-                "Please use the required format separated by vertical bars (`|`):\n"
-                "`Question text? | Option A | Option B | Option C | Option D | A`",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-            return
+                                kb = InlineKeyboardMarkup([
+                                    [InlineKeyboardButton("➕ Add Another Question", callback_data=f"admin:add_q:{comp.id}")],
+                                    [InlineKeyboardButton(f"📋 Manage Questions ({next_order})", callback_data=f"admin:q_list:{comp.id}:1")],
+                                    [InlineKeyboardButton("⚙️ Back to Competition", callback_data="admin:competition")],
+                                ])
+                                await update.message.reply_text(
+                                    f"✅ *Question #{next_order} Added Successfully!*\n\n"
+                                    f"*{q_text}*\n"
+                                    f"A) {options['A']}\nB) {options['B']}\nC) {options['C']}\nD) {options['D']}\n"
+                                    f"Correct: *Option {correct}*",
+                                    reply_markup=kb,
+                                    parse_mode=ParseMode.MARKDOWN,
+                                )
+                                return
+
+            if step == "text":
+                wizard["text"] = text
+                wizard["step"] = "opt_a"
+                prompt = (
+                    "📝 *Add Question (Step 2/5: Option A)*\n\n"
+                    f"*Question:* {text}\n\n"
+                    "Please enter the text for *Option A*:"
+                )
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Discard", callback_data="admin:q_wiz_cancel")]])
+                await update.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            if step == "opt_a":
+                wizard["opt_a"] = text
+                wizard["step"] = "opt_b"
+                prompt = (
+                    "📝 *Add Question (Step 3/5: Option B)*\n\n"
+                    f"*A)* {wizard.get('opt_a')}\n\n"
+                    "Please enter the text for *Option B*:"
+                )
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Discard", callback_data="admin:q_wiz_cancel")]])
+                await update.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            if step == "opt_b":
+                wizard["opt_b"] = text
+                wizard["step"] = "opt_c"
+                prompt = (
+                    "📝 *Add Question (Step 4/5: Option C)*\n\n"
+                    f"*A)* {wizard.get('opt_a')}\n"
+                    f"*B)* {wizard.get('opt_b')}\n\n"
+                    "Please enter the text for *Option C*:"
+                )
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Discard", callback_data="admin:q_wiz_cancel")]])
+                await update.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            if step == "opt_c":
+                wizard["opt_c"] = text
+                wizard["step"] = "opt_d"
+                prompt = (
+                    "📝 *Add Question (Step 5/5: Option D)*\n\n"
+                    f"*A)* {wizard.get('opt_a')}\n"
+                    f"*B)* {wizard.get('opt_b')}\n"
+                    f"*C)* {wizard.get('opt_c')}\n\n"
+                    "Please enter the text for *Option D*:"
+                )
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Discard", callback_data="admin:q_wiz_cancel")]])
+                await update.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            if step == "opt_d":
+                wizard["opt_d"] = text
+                wizard["step"] = "choice"
+                prompt = (
+                    "🎯 *Select Correct Answer*\n\n"
+                    f"*{wizard.get('text')}*\n\n"
+                    f"A) {wizard.get('opt_a')}\n"
+                    f"B) {wizard.get('opt_b')}\n"
+                    f"C) {wizard.get('opt_c')}\n"
+                    f"D) {wizard.get('opt_d')}\n\n"
+                    "Which option is the correct answer? Tap below:"
+                )
+                from app.bot.keyboards import get_admin_question_correct_choice_keyboard
+                await update.message.reply_text(
+                    prompt,
+                    reply_markup=get_admin_question_correct_choice_keyboard(),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
 
     # Case D: Participant Membership ID input
     if context.user_data.get("awaiting_membership"):

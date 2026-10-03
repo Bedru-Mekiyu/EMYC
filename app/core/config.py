@@ -43,6 +43,22 @@ class Settings(BaseSettings):
     DEFAULT_LANGUAGE: str = "en"
     SUPPORTED_LANGUAGES: List[str] = ["en", "am", "om", "ar"]
 
+    @field_validator("ENVIRONMENT", mode="before")
+    @classmethod
+    def detect_render_environment(cls, v: Optional[str]) -> str:
+        import os
+        if os.getenv("RENDER") == "true" or os.getenv("RENDER_SERVICE_ID"):
+            return v if (v and v != "development") else "production"
+        return v or "development"
+
+    @field_validator("BOT_MODE", mode="before")
+    @classmethod
+    def detect_render_bot_mode(cls, v: Optional[str]) -> str:
+        import os
+        if os.getenv("RENDER") == "true" or os.getenv("RENDER_SERVICE_ID"):
+            return v if (v and v != "polling") else "webhook"
+        return v or "polling"
+
     @field_validator("DATABASE_URL", "TEST_DATABASE_URL", mode="before")
     @classmethod
     def assemble_async_db_url(cls, v: Optional[str]) -> Optional[str]:

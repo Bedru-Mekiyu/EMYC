@@ -22,12 +22,13 @@ from app.core.config import settings
 
 # Valid state machine transitions
 ALLOWED_TRANSITIONS = {
-    CompetitionStatus.DRAFT: [CompetitionStatus.SCHEDULED, CompetitionStatus.LIVE],
-    CompetitionStatus.SCHEDULED: [CompetitionStatus.LIVE, CompetitionStatus.CLOSED],
+    CompetitionStatus.DRAFT: [CompetitionStatus.SCHEDULED, CompetitionStatus.LIVE, CompetitionStatus.ARCHIVED],
+    CompetitionStatus.SCHEDULED: [CompetitionStatus.LIVE, CompetitionStatus.CLOSED, CompetitionStatus.ARCHIVED],
     CompetitionStatus.LIVE: [CompetitionStatus.CLOSED],
-    CompetitionStatus.CLOSED: [CompetitionStatus.RESULTS_FINALIZED],
-    CompetitionStatus.RESULTS_FINALIZED: [CompetitionStatus.PUBLISHED],
-    CompetitionStatus.PUBLISHED: [],
+    CompetitionStatus.CLOSED: [CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.ARCHIVED],
+    CompetitionStatus.RESULTS_FINALIZED: [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED],
+    CompetitionStatus.PUBLISHED: [CompetitionStatus.ARCHIVED],
+    CompetitionStatus.ARCHIVED: [],
 }
 
 

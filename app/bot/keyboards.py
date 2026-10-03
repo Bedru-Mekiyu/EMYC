@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import Optional, Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.locales.translator import get_text
 
@@ -146,12 +146,23 @@ def get_admin_participants_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     ])
 
 
-def get_admin_rankings_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Keyboard for rankings and leaderboard screen."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:rankings")],
-        [InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")],
+def get_admin_rankings_keyboard(lang: str = "en", page: int = 1, total_pages: int = 1) -> InlineKeyboardMarkup:
+    """Keyboard for rankings and leaderboard screen with pagination support."""
+    rows = []
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton("◀️ Prev", callback_data=f"admin:rankings:{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton(f"Page {page} / {total_pages}", callback_data=f"admin:rankings:{page}"))
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"admin:rankings:{page + 1}"))
+        rows.append(nav_buttons)
+
+    rows.append([
+        InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data=f"admin:rankings:{page}"),
+        InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
     ])
+    return InlineKeyboardMarkup(rows)
 
 
 def get_admin_system_status_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
@@ -218,4 +229,56 @@ def get_admin_confirm_announcement_keyboard(lang: str = "en") -> InlineKeyboardM
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def get_admin_question_correct_choice_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for selecting the correct answer during interactive question creation."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("A", callback_data="admin:q_wiz_choice:A"),
+            InlineKeyboardButton("B", callback_data="admin:q_wiz_choice:B"),
+            InlineKeyboardButton("C", callback_data="admin:q_wiz_choice:C"),
+            InlineKeyboardButton("D", callback_data="admin:q_wiz_choice:D"),
+        ],
+        [InlineKeyboardButton("❌ Discard", callback_data="admin:q_wiz_cancel")],
+    ])
+
+
+def get_admin_question_preview_keyboard(comp_id: Any) -> InlineKeyboardMarkup:
+    """Keyboard for previewing and confirming question addition."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💾 Save Question", callback_data=f"admin:q_wiz_save:{comp_id}")],
+        [InlineKeyboardButton("❌ Discard", callback_data="admin:q_wiz_cancel")],
+    ])
+
+
+def get_admin_question_list_keyboard(comp_id: Any, page: int, total_pages: int, questions: list) -> InlineKeyboardMarkup:
+    """Keyboard for managing questions in a competition with pagination and delete buttons."""
+    rows = []
+    # Add a row for each question to delete
+    for q in questions:
+        title_snippet = q.question_text[:25] + ("..." if len(q.question_text) > 25 else "")
+        rows.append([
+            InlineKeyboardButton(f"🗑 Delete #{q.order_index}: {title_snippet}", callback_data=f"admin:q_del:{comp_id}:{q.id}")
+        ])
+
+    # Pagination navigation
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton("◀️ Prev", callback_data=f"admin:q_list:{comp_id}:{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton(f"Page {page} / {total_pages}", callback_data=f"admin:q_list:{comp_id}:{page}"))
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"admin:q_list:{comp_id}:{page + 1}"))
+        rows.append(nav_buttons)
+
+    # Action buttons
+    rows.append([
+        InlineKeyboardButton("➕ Add Another Question", callback_data=f"admin:add_q:{comp_id}"),
+    ])
+    rows.append([
+        InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition"),
+        InlineKeyboardButton("◀️ Admin Home", callback_data="admin:home"),
+    ])
+    return InlineKeyboardMarkup(rows)
 

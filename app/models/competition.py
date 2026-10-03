@@ -16,6 +16,7 @@ class CompetitionStatus(str, enum.Enum):
     CLOSED = "CLOSED"
     RESULTS_FINALIZED = "RESULTS_FINALIZED"
     PUBLISHED = "PUBLISHED"
+    ARCHIVED = "ARCHIVED"
 
 
 class Competition(Base):

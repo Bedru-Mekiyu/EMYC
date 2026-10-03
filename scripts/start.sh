@@ -1,6 +1,13 @@
 #!/bin/sh
 set -e
 
+# Detect Render cloud environment and enforce production defaults
+if [ "$RENDER" = "true" ] || [ -n "$RENDER_SERVICE_ID" ]; then
+    echo "==> Render deployment detected: enforcing production defaults..."
+    export ENVIRONMENT="${ENVIRONMENT:-production}"
+    export BOT_MODE="${BOT_MODE:-webhook}"
+fi
+
 echo "================================================================================"
 echo " Starting EMYC Telegram Competitive Exam Platform"
 echo "================================================================================"

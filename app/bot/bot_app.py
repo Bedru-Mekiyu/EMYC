@@ -43,6 +43,12 @@ from app.bot.handlers.admin import (
     cb_admin_create_schedule,
     cb_admin_create_questions,
     cb_admin_add_question_prompt,
+    cb_admin_q_wiz_choice,
+    cb_admin_q_wiz_save,
+    cb_admin_q_wiz_cancel,
+    cb_admin_q_list,
+    cb_admin_q_del,
+    cb_admin_archive,
 )
 
 settings = get_settings()
@@ -79,7 +85,7 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cmd_admin, pattern="^admin:home$"))
     app.add_handler(CallbackQueryHandler(cb_admin_status, pattern="^admin:status$"))
     app.add_handler(CallbackQueryHandler(cb_admin_participants, pattern="^admin:participants$"))
-    app.add_handler(CallbackQueryHandler(cb_admin_rankings, pattern="^admin:rankings$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_rankings, pattern="^admin:rankings(:.*)?$"))
     app.add_handler(CallbackQueryHandler(cb_admin_sys_status, pattern="^admin:sys_status$"))
     app.add_handler(CallbackQueryHandler(cb_admin_competition, pattern="^admin:competition$"))
     app.add_handler(CallbackQueryHandler(cb_admin_create_comp_start, pattern="^admin:create_comp:start$"))
@@ -87,6 +93,12 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_create_schedule, pattern="^admin:create_sched:"))
     app.add_handler(CallbackQueryHandler(cb_admin_create_questions, pattern="^admin:create_q:"))
     app.add_handler(CallbackQueryHandler(cb_admin_add_question_prompt, pattern="^admin:add_q:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_q_wiz_choice, pattern="^admin:q_wiz_choice:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_q_wiz_save, pattern="^admin:q_wiz_save:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_q_wiz_cancel, pattern="^admin:q_wiz_cancel$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_q_list, pattern="^admin:q_list:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_q_del, pattern="^admin:q_del:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_archive, pattern="^admin:archive:"))
     app.add_handler(CallbackQueryHandler(cb_admin_setup_sample, pattern="^admin:setup_sample:"))
     app.add_handler(CallbackQueryHandler(cb_admin_to_participant, pattern="^admin:to_participant$"))
     app.add_handler(CallbackQueryHandler(cb_admin_set_status, pattern="^admin:set_"))

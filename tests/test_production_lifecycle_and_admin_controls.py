@@ -22,6 +22,11 @@ from app.bot.handlers.admin import (
     cb_admin_create_schedule,
     cb_admin_create_questions,
     cb_admin_add_question_prompt,
+    cb_admin_q_wiz_choice,
+    cb_admin_q_wiz_save,
+    cb_admin_q_list,
+    cb_admin_q_del,
+    cb_admin_archive,
 )
 from app.bot.handlers.participant import (
     cb_start_flow,
@@ -32,6 +37,7 @@ from app.bot.handlers.participant import (
 from app.services.competition_service import CompetitionService
 from app.services.membership_service import ParticipantService, MockMembershipVerificationService
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 
 
 @pytest.mark.asyncio
@@ -430,3 +436,368 @@ async def test_membership_zero_leakage_and_already_bound_handling(db_session: As
     msg_diff.reply_text.assert_called_once()
     bound_text = msg_diff.reply_text.call_args[0][0]
     assert "already linked" in bound_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_competition_archived_lifecycle(db_session: AsyncSession):
+    """Verifies ARCHIVED competition status transitions and Telegram archive handler."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Archival Test Cup",
+        status=CompetitionStatus.DRAFT,
+        opens_at=now,
+        closes_at=now + timedelta(days=1),
+        duration_minutes=30,
+        question_count=0,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+    await db_session.refresh(comp)
+
+    # DRAFT -> ARCHIVED is valid
+    comp = await CompetitionService.update_status(db_session, comp.id, CompetitionStatus.ARCHIVED)
+    assert comp.status == CompetitionStatus.ARCHIVED
+
+    # ARCHIVED -> cannot transition to any other status
+    with pytest.raises(Exception):
+        await CompetitionService.update_status(db_session, comp.id, CompetitionStatus.LIVE)
+
+    # Test via Telegram callback handler
+    comp2 = Competition(
+        title="Archival Via Bot Cup",
+        status=CompetitionStatus.PUBLISHED,
+        opens_at=now - timedelta(days=2),
+        closes_at=now - timedelta(days=1),
+        duration_minutes=30,
+        question_count=0,
+    )
+    db_session.add(comp2)
+    await db_session.commit()
+
+    query = MagicMock()
+    query.data = f"admin:archive:{comp2.id}"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    update.callback_query = query
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    await cb_admin_archive(update, context)
+    query.edit_message_text.assert_called_once()
+    rendered = query.edit_message_text.call_args[0][0]
+    assert "Competition Archived Successfully" in rendered
+
+    await db_session.refresh(comp2)
+    assert comp2.status == CompetitionStatus.ARCHIVED
+
+
+@pytest.mark.asyncio
+async def test_step_by_step_question_authoring_wizard(db_session: AsyncSession):
+    """Verifies that the 5-step conversational question authoring wizard works end-to-end."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Wizard Question Cup",
+        status=CompetitionStatus.DRAFT,
+        opens_at=now,
+        closes_at=now + timedelta(days=2),
+        duration_minutes=30,
+        question_count=0,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+    await db_session.refresh(comp)
+
+    # 1. Admin taps "Add Question"
+    query_start = MagicMock()
+    query_start.data = f"admin:add_q:{comp.id}"
+    query_start.answer = AsyncMock()
+    query_start.edit_message_text = AsyncMock()
+    update_start = MagicMock(spec=Update)
+    update_start.effective_user = admin_user
+    update_start.callback_query = query_start
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    await cb_admin_add_question_prompt(update_start, context)
+    assert "q_wizard" in context.user_data
+    assert context.user_data["q_wizard"]["step"] == "text"
+
+    # Helper function to simulate user text responses
+    async def send_text(text: str):
+        update = MagicMock(spec=Update)
+        update.effective_user = admin_user
+        msg = MagicMock()
+        msg.text = text
+        msg.reply_text = AsyncMock()
+        update.message = msg
+        await handle_text_message(update, context)
+        return msg.reply_text
+
+    # Step 1 -> Step 2
+    r1 = await send_text("What is the first pillar of Islam?")
+    assert context.user_data["q_wizard"]["step"] == "opt_a"
+    assert context.user_data["q_wizard"]["text"] == "What is the first pillar of Islam?"
+
+    # Step 2 -> Step 3
+    r2 = await send_text("Shahada (Declaration of Faith)")
+    assert context.user_data["q_wizard"]["step"] == "opt_b"
+    assert context.user_data["q_wizard"]["opt_a"] == "Shahada (Declaration of Faith)"
+
+    # Step 3 -> Step 4
+    r3 = await send_text("Salah (Prayer)")
+    assert context.user_data["q_wizard"]["step"] == "opt_c"
+    assert context.user_data["q_wizard"]["opt_b"] == "Salah (Prayer)"
+
+    # Step 4 -> Step 5
+    r4 = await send_text("Zakat (Charity)")
+    assert context.user_data["q_wizard"]["step"] == "opt_d"
+    assert context.user_data["q_wizard"]["opt_c"] == "Zakat (Charity)"
+
+    # Step 5 -> Correct choice selection
+    r5 = await send_text("Sawm (Fasting)")
+    assert context.user_data["q_wizard"]["step"] == "choice"
+    assert context.user_data["q_wizard"]["opt_d"] == "Sawm (Fasting)"
+
+    # Admin taps choice "A"
+    query_choice = MagicMock()
+    query_choice.data = "admin:q_wiz_choice:A"
+    query_choice.answer = AsyncMock()
+    query_choice.edit_message_text = AsyncMock()
+    update_choice = MagicMock(spec=Update)
+    update_choice.effective_user = admin_user
+    update_choice.callback_query = query_choice
+
+    await cb_admin_q_wiz_choice(update_choice, context)
+    assert context.user_data["q_wizard"]["step"] == "preview"
+    assert context.user_data["q_wizard"]["correct"] == "A"
+    query_choice.edit_message_text.assert_called_once()
+    preview = query_choice.edit_message_text.call_args[0][0]
+    assert "What is the first pillar of Islam?" in preview
+    assert "A) Shahada (Declaration of Faith)" in preview
+
+    # Admin confirms save
+    query_save = MagicMock()
+    query_save.data = f"admin:q_wiz_save:{comp.id}"
+    query_save.answer = AsyncMock()
+    query_save.edit_message_text = AsyncMock()
+    update_save = MagicMock(spec=Update)
+    update_save.effective_user = admin_user
+    update_save.callback_query = query_save
+
+    await cb_admin_q_wiz_save(update_save, context)
+    query_save.edit_message_text.assert_called_once()
+    saved_text = query_save.edit_message_text.call_args[0][0]
+    assert "Saved Successfully" in saved_text
+
+    # Verify persisted in database
+    q_stmt = select(CompetitionQuestion).where(CompetitionQuestion.competition_id == comp.id)
+    questions = list((await db_session.execute(q_stmt)).scalars().all())
+    assert len(questions) == 1
+    assert questions[0].question_text == "What is the first pillar of Islam?"
+    assert questions[0].correct_option == "A"
+    assert questions[0].options["A"] == "Shahada (Declaration of Faith)"
+    assert questions[0].order_index == 1
+
+    await db_session.refresh(comp)
+    assert comp.question_count == 1
+
+
+@pytest.mark.asyncio
+async def test_question_list_and_deletion_reindexing(db_session: AsyncSession):
+    """Verifies that listing questions and deleting questions automatically re-indexes order_index."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Reindex Test Cup",
+        status=CompetitionStatus.DRAFT,
+        opens_at=now,
+        closes_at=now + timedelta(days=2),
+        duration_minutes=30,
+        question_count=3,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    q1 = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Question 1",
+        options={"A": "1", "B": "2", "C": "3", "D": "4"},
+        correct_option="A",
+        order_index=1,
+    )
+    q2 = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Question 2 (To Delete)",
+        options={"A": "1", "B": "2", "C": "3", "D": "4"},
+        correct_option="B",
+        order_index=2,
+    )
+    q3 = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Question 3",
+        options={"A": "1", "B": "2", "C": "3", "D": "4"},
+        correct_option="C",
+        order_index=3,
+    )
+    db_session.add_all([q1, q2, q3])
+    await db_session.commit()
+
+    # 1. Admin views question list
+    query_list = MagicMock()
+    query_list.data = f"admin:q_list:{comp.id}:1"
+    query_list.answer = AsyncMock()
+    query_list.edit_message_text = AsyncMock()
+    update_list = MagicMock(spec=Update)
+    update_list.effective_user = admin_user
+    update_list.callback_query = query_list
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    await cb_admin_q_list(update_list, context)
+    query_list.edit_message_text.assert_called_once()
+    list_text = query_list.edit_message_text.call_args[0][0]
+    assert "Total Questions: *3*" in list_text
+    assert "Question 1" in list_text
+    assert "Question 2 (To Delete)" in list_text
+
+    target_comp_id = comp.id
+
+    # 2. Admin deletes question 2
+    query_del = MagicMock()
+    query_del.data = f"admin:q_del:{comp.id}:{q2.id}"
+    query_del.answer = AsyncMock()
+    query_del.edit_message_text = AsyncMock()
+    update_del = MagicMock(spec=Update)
+    update_del.effective_user = admin_user
+    update_del.callback_query = query_del
+
+    await cb_admin_q_del(update_del, context)
+
+    # Verify database state after deletion using a clean session
+    async with AsyncSessionLocal() as verify_db:
+        q_stmt = select(CompetitionQuestion).where(CompetitionQuestion.competition_id == target_comp_id).order_by(CompetitionQuestion.order_index)
+        remaining = list((await verify_db.execute(q_stmt)).scalars().all())
+        assert len(remaining) == 2
+        assert remaining[0].question_text == "Question 1"
+        assert remaining[0].order_index == 1
+        assert remaining[1].question_text == "Question 3"
+        assert remaining[1].order_index == 2  # re-indexed from 3 to 2!
+
+        comp_fresh = await verify_db.get(Competition, target_comp_id)
+        assert comp_fresh.question_count == 2
+
+
+@pytest.mark.asyncio
+async def test_paginated_rankings(db_session: AsyncSession):
+    """Verifies that leaderboard rankings are properly paginated to avoid message limits."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Pagination Cup",
+        status=CompetitionStatus.RESULTS_FINALIZED,
+        opens_at=now - timedelta(days=2),
+        closes_at=now - timedelta(days=1),
+        duration_minutes=30,
+        question_count=20,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    # Seed 15 participants and attempts
+    for i in range(1, 16):
+        p = Participant(
+            telegram_user_id=5000 + i,
+            telegram_username=f"member_{i:02d}",
+            membership_id=f"EMYC/40559{i:02d}/2026",
+            language_code="en",
+        )
+        db_session.add(p)
+        await db_session.flush()
+
+        att = ExamAttempt(
+            competition_id=comp.id,
+            participant_id=p.id,
+            status=AttemptStatus.FINALIZED,
+            started_at=now - timedelta(hours=2),
+            deadline_at=now - timedelta(hours=1),
+            score=20 - i,
+            rank=i,
+            completion_seconds=600 + i * 10,
+        )
+        db_session.add(att)
+    await db_session.commit()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    # Page 1 (Top 10)
+    query_p1 = MagicMock()
+    query_p1.data = "admin:rankings:1"
+    query_p1.answer = AsyncMock()
+    query_p1.edit_message_text = AsyncMock()
+    update_p1 = MagicMock(spec=Update)
+    update_p1.effective_user = admin_user
+    update_p1.callback_query = query_p1
+
+    await cb_admin_rankings(update_p1, context)
+    text_p1 = query_p1.edit_message_text.call_args[0][0]
+    assert "15 | Page 1 of 2" in text_p1
+    assert "#1" in text_p1
+    assert "member_01" in text_p1
+    assert "#10" in text_p1
+    assert "member_11" not in text_p1
+
+    # Page 2 (Remaining 5)
+    query_p2 = MagicMock()
+    query_p2.data = "admin:rankings:2"
+    query_p2.answer = AsyncMock()
+    query_p2.edit_message_text = AsyncMock()
+    update_p2 = MagicMock(spec=Update)
+    update_p2.effective_user = admin_user
+    update_p2.callback_query = query_p2
+
+    await cb_admin_rankings(update_p2, context)
+    text_p2 = query_p2.edit_message_text.call_args[0][0]
+    assert "15 | Page 2 of 2" in text_p2
+    assert "#11" in text_p2
+    assert "member_11" in text_p2
+    assert "#15" in text_p2
+    assert "member_15" in text_p2
+
+
+def test_render_production_guard(monkeypatch):
+    """Verifies that RENDER=true automatically enforces production environment and webhook bot mode."""
+    from app.core.config import Settings
+
+    # With RENDER=true
+    monkeypatch.setenv("RENDER", "true")
+    s = Settings(
+        TELEGRAM_BOT_TOKEN="token",
+        ADMIN_TELEGRAM_IDS="123",
+    )
+    assert s.ENVIRONMENT == "production"
+    assert s.BOT_MODE == "webhook"
+
+    # Explicit override allowed
+    monkeypatch.setenv("RENDER", "true")
+    s_custom = Settings(
+        TELEGRAM_BOT_TOKEN="token",
+        ENVIRONMENT="staging",
+        BOT_MODE="disabled",
+    )
+    assert s_custom.ENVIRONMENT == "staging"
+    assert s_custom.BOT_MODE == "disabled"
+
