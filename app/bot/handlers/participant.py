@@ -156,6 +156,19 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # 2. Registered -> Check active competition
         comp = await CompetitionService.get_active_competition(db)
         if not comp:
+            from app.core.config import get_settings
+            if get_settings().is_admin(user.id):
+                admin_hint = (
+                    "⏳ *No competition is currently LIVE.*\n\n"
+                    "👑 As an administrator, you can configure questions and set a competition to `LIVE` via the Admin Dashboard."
+                )
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")],
+                    [InlineKeyboardButton("🔙 Main Menu", callback_data="menu:home")],
+                ])
+                await query.edit_message_text(admin_hint, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
             text = get_text("competition_not_open", lang, opens_at="Soon", closes_at="TBA")
             await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang))
             return
@@ -527,10 +540,40 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             attempt = await CompetitionService.start_attempt(db, comp_id, participant.id)
             await render_question_screen(query, attempt.id, display_order=1, lang=lang, participant_id=participant.id)
+        except DuplicateAttemptError:
+            # Check existing attempt: if IN_PROGRESS, resume it directly!
+            stmt = select(ExamAttempt).where(
+                and_(
+                    ExamAttempt.competition_id == comp_id,
+                    ExamAttempt.participant_id == participant.id,
+                )
+            )
+            existing_attempt = (await db.execute(stmt)).scalar_one_or_none()
+            if existing_attempt and existing_attempt.status == AttemptStatus.IN_PROGRESS:
+                ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == existing_attempt.id)
+                ans_ids = set((await db.execute(ans_stmt)).scalars().all())
+
+                order_stmt = (
+                    select(AttemptQuestionOrder.display_order)
+                    .where(
+                        and_(
+                            AttemptQuestionOrder.attempt_id == existing_attempt.id,
+                            ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
+                        )
+                    )
+                    .order_by(AttemptQuestionOrder.display_order.asc())
+                    .limit(1)
+                )
+                first_unanswered = (await db.execute(order_stmt)).scalar() or 1
+                await render_question_screen(query, existing_attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
+                return
+
+            await query.edit_message_text(get_text("already_submitted", lang), reply_markup=get_main_menu_keyboard(lang))
         except CompetitionNotOpenError as e:
             await query.edit_message_text(f"⏳ {str(e)}", reply_markup=get_main_menu_keyboard(lang))
-        except DuplicateAttemptError:
-            await query.edit_message_text(get_text("already_submitted", lang), reply_markup=get_main_menu_keyboard(lang))
+        except Exception as e:
+            logger.error(f"Error starting exam: {e}", exc_info=True)
+            await query.edit_message_text(f"❌ Error starting exam: {str(e)}", reply_markup=get_main_menu_keyboard(lang))
 
 
 async def render_question_screen(
@@ -556,6 +599,13 @@ async def render_question_screen(
         except UnauthorizedAttemptAccessError:
             await query.edit_message_text(
                 "❌ Unauthorized attempt access.",
+                reply_markup=get_main_menu_keyboard(lang),
+            )
+            return
+        except Exception as e:
+            logger.error(f"Failed to fetch question for attempt: {e}", exc_info=True)
+            await query.edit_message_text(
+                f"❌ Error fetching question: {str(e)}",
                 reply_markup=get_main_menu_keyboard(lang),
             )
             return
@@ -588,11 +638,27 @@ async def render_question_screen(
         lang=lang,
     )
 
-    await query.edit_message_text(
-        msg_body,
-        reply_markup=keyboard,
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    try:
+        await query.edit_message_text(
+            msg_body,
+            reply_markup=keyboard,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to edit question with Markdown parse mode ({e}); retrying without Markdown formatting")
+        plain_body = msg_body.replace("*", "").replace("_", "").replace("`", "")
+        try:
+            await query.edit_message_text(
+                plain_body,
+                reply_markup=keyboard,
+            )
+        except Exception as e2:
+            logger.error(f"Failed to edit question screen: {e2}")
+            if query.message:
+                await query.message.reply_text(
+                    plain_body,
+                    reply_markup=keyboard,
+                )
 
 
 async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
