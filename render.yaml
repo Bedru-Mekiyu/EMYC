@@ -1,15 +1,13 @@
 services:
   - type: web
     name: emyc-competition-platform
-    runtime: python
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: starter
-    buildCommand: pip install -r requirements.txt && alembic upgrade head
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeploy: false
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.6
       - key: ENVIRONMENT
         value: production
       - key: DEBUG
