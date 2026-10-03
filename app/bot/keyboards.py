@@ -116,25 +116,97 @@ def get_results_keyboard(
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Main administrative control panel keyboard:
-    - Status & Results
-    - Announcement & Competition
-    - Switch to Participant View
-    """
+    """Main administrative control panel keyboard with dedicated operational categories."""
     keyboard = [
         [
-            InlineKeyboardButton(get_text("admin_btn_status", lang), callback_data="admin:status"),
-            InlineKeyboardButton(get_text("admin_btn_results", lang), callback_data="admin:results"),
-        ],
-        [
-            InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
             InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
+            InlineKeyboardButton(get_text("admin_btn_participants", lang), callback_data="admin:participants"),
         ],
         [
-            InlineKeyboardButton("👤 Switch to Participant View", callback_data="admin:to_participant"),
+            InlineKeyboardButton(get_text("admin_btn_status", lang), callback_data="admin:status"),
+            InlineKeyboardButton(get_text("admin_btn_rankings", lang), callback_data="admin:rankings"),
+        ],
+        [
+            InlineKeyboardButton(get_text("admin_btn_results", lang), callback_data="admin:results"),
+            InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
+        ],
+        [
+            InlineKeyboardButton(get_text("admin_btn_sys_status", lang), callback_data="admin:sys_status"),
+            InlineKeyboardButton(get_text("admin_btn_participant_view", lang), callback_data="admin:to_participant"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def get_admin_participants_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    """Keyboard for dedicated participants analytics screen."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:participants")],
+        [InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")],
+    ])
+
+
+def get_admin_rankings_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    """Keyboard for rankings and leaderboard screen."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:rankings")],
+        [InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")],
+    ])
+
+
+def get_admin_system_status_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    """Keyboard for system status & health check screen."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:sys_status")],
+        [InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")],
+    ])
+
+
+def get_admin_create_comp_duration_keyboard() -> InlineKeyboardMarkup:
+    """Interactive duration preset selector during competition creation."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⏱ 15 Minutes", callback_data="admin:create_dur:15"),
+            InlineKeyboardButton("⏱ 30 Minutes", callback_data="admin:create_dur:30"),
+        ],
+        [
+            InlineKeyboardButton("⏱ 60 Minutes", callback_data="admin:create_dur:60"),
+            InlineKeyboardButton("⏱ 120 Minutes", callback_data="admin:create_dur:120"),
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")],
+    ])
+
+
+def get_admin_create_comp_schedule_keyboard() -> InlineKeyboardMarkup:
+    """Interactive schedule window selector during competition creation."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📅 24 Hours", callback_data="admin:create_sched:24h"),
+            InlineKeyboardButton("📅 3 Days", callback_data="admin:create_sched:3d"),
+        ],
+        [
+            InlineKeyboardButton("📅 7 Days", callback_data="admin:create_sched:7d"),
+            InlineKeyboardButton("📅 14 Days", callback_data="admin:create_sched:14d"),
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")],
+    ])
+
+
+def get_admin_create_comp_questions_keyboard() -> InlineKeyboardMarkup:
+    """Question setup mode selector during competition creation."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "⚡ Attach EMYC Standard Questions", callback_data="admin:create_q:standard"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📝 Create Empty (Add Questions Manually)", callback_data="admin:create_q:manual"
+            )
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")],
+    ])
 
 
 def get_admin_confirm_announcement_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
@@ -146,3 +218,4 @@ def get_admin_confirm_announcement_keyboard(lang: str = "en") -> InlineKeyboardM
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+

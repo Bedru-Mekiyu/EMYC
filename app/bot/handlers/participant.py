@@ -1,6 +1,6 @@
 import uuid
 from typing import Dict, Any, Optional
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from sqlalchemy import select, and_, func
@@ -8,8 +8,14 @@ from sqlalchemy import select, and_, func
 from app.core.database import AsyncSessionLocal
 from app.core.logging import logger
 from app.locales.translator import get_text
-from app.models.attempt import ExamAttempt, AttemptStatus
-from app.models.competition import CompetitionStatus
+from app.models.attempt import (
+    ExamAttempt,
+    AttemptStatus,
+    AttemptQuestionOrder,
+    ParticipantAnswer,
+)
+from app.models.competition import Competition, CompetitionStatus
+from app.models.question import CompetitionQuestion
 from app.services.membership_service import (
     ParticipantService,
     InvalidMembershipFormatError,
@@ -37,6 +43,7 @@ from app.bot.keyboards import (
     get_question_keyboard,
     get_results_keyboard,
     get_admin_confirm_announcement_keyboard,
+    get_admin_create_comp_duration_keyboard,
 )
 
 
@@ -164,9 +171,24 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         attempt = res.scalar_one_or_none()
 
         if attempt:
-            # If in progress, resume where they left off
+            # If in progress, resume where they left off (first unanswered question)
             if attempt.status == AttemptStatus.IN_PROGRESS:
-                await render_question_screen(query, attempt.id, display_order=1, lang=lang, participant_id=participant.id)
+                ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
+                ans_ids = set((await db.execute(ans_stmt)).scalars().all())
+
+                order_stmt = (
+                    select(AttemptQuestionOrder.display_order)
+                    .where(
+                        and_(
+                            AttemptQuestionOrder.attempt_id == attempt.id,
+                            ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
+                        )
+                    )
+                    .order_by(AttemptQuestionOrder.display_order.asc())
+                    .limit(1)
+                )
+                first_unanswered = (await db.execute(order_stmt)).scalar() or 1
+                await render_question_screen(query, attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
                 return
 
             # If already submitted / finished:
@@ -257,7 +279,96 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
 
-    # Case B: Participant Membership ID input
+    # Case B: Admin interactive competition creation wizard
+    if context.user_data.get("create_comp"):
+        from app.core.config import get_settings
+        if get_settings().is_admin(user.id):
+            wizard = context.user_data["create_comp"]
+            step = wizard.get("step")
+
+            if step == "title":
+                wizard["title"] = text
+                wizard["step"] = "description"
+                prompt = (
+                    f"📝 *Create New EMYC Competition (Step 2/4)*\n\n"
+                    f"*Title:* {text}\n\n"
+                    f"Please type a brief *Description* (or send /skip):"
+                )
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")]])
+                await update.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            if step == "description":
+                wizard["description"] = None if text.lower() == "/skip" else text
+                wizard["step"] = "duration"
+                prompt = (
+                    f"⏱ *Create New EMYC Competition (Step 3/4)*\n\n"
+                    f"*Title:* {wizard['title']}\n\n"
+                    f"Select the allowed *Attempt Duration* per participant:"
+                )
+                await update.message.reply_text(
+                    prompt,
+                    reply_markup=get_admin_create_comp_duration_keyboard(),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+    # Case C: Admin interactive question addition
+    if context.user_data.get("awaiting_question_comp_id"):
+        from app.core.config import get_settings
+        if get_settings().is_admin(user.id):
+            comp_id = context.user_data.pop("awaiting_question_comp_id")
+            parts = [p.strip() for p in text.split("|")]
+            if len(parts) >= 6:
+                q_text = parts[0]
+                options = {
+                    "A": parts[1].removeprefix("A)").removeprefix("A.").strip(),
+                    "B": parts[2].removeprefix("B)").removeprefix("B.").strip(),
+                    "C": parts[3].removeprefix("C)").removeprefix("C.").strip(),
+                    "D": parts[4].removeprefix("D)").removeprefix("D.").strip(),
+                }
+                correct = parts[5].strip().upper()
+                if correct in ["A", "B", "C", "D"]:
+                    async with AsyncSessionLocal() as db:
+                        comp = await db.get(Competition, comp_id)
+                        if comp and comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+                            next_order = comp.question_count + 1
+                            q = CompetitionQuestion(
+                                competition_id=comp.id,
+                                question_text=q_text,
+                                options=options,
+                                correct_option=correct,
+                                order_index=next_order,
+                            )
+                            db.add(q)
+                            comp.question_count = next_order
+                            await db.commit()
+
+                            kb = InlineKeyboardMarkup([
+                                [InlineKeyboardButton("➕ Add Another Question", callback_data=f"admin:add_q:{comp.id}")],
+                                [InlineKeyboardButton("⚙️ Back to Competition", callback_data="admin:competition")],
+                            ])
+                            await update.message.reply_text(
+                                f"✅ *Question #{next_order} Added Successfully!*\n\n"
+                                f"*{q_text}*\n"
+                                f"A) {options['A']}\nB) {options['B']}\nC) {options['C']}\nD) {options['D']}\n"
+                                f"Correct: *{correct}*",
+                                reply_markup=kb,
+                                parse_mode=ParseMode.MARKDOWN,
+                            )
+                            return
+
+            # Invalid question format fallback
+            context.user_data["awaiting_question_comp_id"] = comp_id
+            await update.message.reply_text(
+                "⚠️ *Invalid question format!*\n\n"
+                "Please use the required format separated by vertical bars (`|`):\n"
+                "`Question text? | Option A | Option B | Option C | Option D | A`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+    # Case D: Participant Membership ID input
     if context.user_data.get("awaiting_membership"):
         async with AsyncSessionLocal() as db:
             try:
@@ -318,8 +429,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
             except MembershipAlreadyBoundError:
                 await update.message.reply_text(get_text("membership_already_bound", lang))
-            except TelegramAccountAlreadyBoundError as e:
-                await update.message.reply_text(f"❌ {str(e)}")
+            except TelegramAccountAlreadyBoundError:
+                await update.message.reply_text(
+                    get_text("membership_account_already_bound", lang),
+                    reply_markup=get_main_menu_keyboard(lang),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
 
 
 async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

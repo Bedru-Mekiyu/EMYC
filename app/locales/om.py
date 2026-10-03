@@ -104,4 +104,13 @@ MESSAGES = {
     ),
     "btn_confirm_broadcast": "✅ Mirkaneessi Ergi",
     "btn_cancel": "❌ Dhiisi",
+    "membership_account_already_bound": "❌ Akkaawuntiin Telegiraamii kun miseensa EMYC mirkanaa'e waliin hidhata qaba.",
+    "admin_btn_participants": "👥 Hirmattota",
+    "admin_btn_rankings": "🏅 Sadarkaa Ilaali",
+    "admin_btn_sys_status": "💻 Haala Sirnaa",
+    "admin_btn_participant_view": "👤 Ilaalcha Hirmattuu",
+    "admin_btn_publish_results": "🏆 Bu'aa Labsii",
+    "admin_btn_create_comp": "➕ Dorgommii Uumi",
+    "admin_btn_refresh": "🔄 Haaromsi",
+    "admin_btn_back": "◀️ Gara Gulaalaatti Deebi'i",
 }

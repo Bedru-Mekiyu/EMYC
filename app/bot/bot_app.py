@@ -35,6 +35,14 @@ from app.bot.handlers.admin import (
     cb_admin_publish,
     cb_admin_announce,
     cb_admin_announce_confirm,
+    cb_admin_participants,
+    cb_admin_rankings,
+    cb_admin_sys_status,
+    cb_admin_create_comp_start,
+    cb_admin_create_duration,
+    cb_admin_create_schedule,
+    cb_admin_create_questions,
+    cb_admin_add_question_prompt,
 )
 
 settings = get_settings()
@@ -70,7 +78,15 @@ def build_application(token: Optional[str] = None) -> Application:
     # Admin Callback Queries
     app.add_handler(CallbackQueryHandler(cmd_admin, pattern="^admin:home$"))
     app.add_handler(CallbackQueryHandler(cb_admin_status, pattern="^admin:status$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_participants, pattern="^admin:participants$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_rankings, pattern="^admin:rankings$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_sys_status, pattern="^admin:sys_status$"))
     app.add_handler(CallbackQueryHandler(cb_admin_competition, pattern="^admin:competition$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_create_comp_start, pattern="^admin:create_comp:start$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_create_duration, pattern="^admin:create_dur:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_create_schedule, pattern="^admin:create_sched:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_create_questions, pattern="^admin:create_q:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_add_question_prompt, pattern="^admin:add_q:"))
     app.add_handler(CallbackQueryHandler(cb_admin_setup_sample, pattern="^admin:setup_sample:"))
     app.add_handler(CallbackQueryHandler(cb_admin_to_participant, pattern="^admin:to_participant$"))
     app.add_handler(CallbackQueryHandler(cb_admin_set_status, pattern="^admin:set_"))

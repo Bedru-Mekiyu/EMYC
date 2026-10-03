@@ -103,11 +103,11 @@ def get_membership_service() -> MembershipVerificationService:
 class ParticipantService:
     @staticmethod
     def validate_format(membership_id: str) -> str:
-        """Validates format of membership ID string."""
+        """Validates format of membership ID string without leaking internal regex rules."""
         cleaned = membership_id.strip().upper()
         if not re.match(settings.MEMBERSHIP_REGEX, cleaned):
             raise InvalidMembershipFormatError(
-                f"Invalid membership ID format. Must match {settings.MEMBERSHIP_REGEX}"
+                "Membership verification could not be completed. Please check your official membership ID and try again."
             )
         return cleaned
 
@@ -166,7 +166,7 @@ class ParticipantService:
         if existing_tg_user:
             if existing_tg_user.membership_id != cleaned_membership:
                 raise TelegramAccountAlreadyBoundError(
-                    f"This Telegram account is already bound to membership {existing_tg_user.membership_id}"
+                    "This Telegram account is already linked to a verified EMYC membership."
                 )
             # Already bound to the same membership ID - idempotent return
             return existing_tg_user

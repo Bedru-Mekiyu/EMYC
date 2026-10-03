@@ -104,4 +104,13 @@ MESSAGES = {
     ),
     "btn_confirm_broadcast": "✅ تأكيد وإرسال",
     "btn_cancel": "❌ إلغاء",
+    "membership_account_already_bound": "❌ حساب تليغرام هذا مرتبط بالفعل بعضوية EMYC تم التحقق منها.",
+    "admin_btn_participants": "👥 المشاركون",
+    "admin_btn_rankings": "🏅 عرض الترتيب",
+    "admin_btn_sys_status": "💻 حالة النظام",
+    "admin_btn_participant_view": "👤 وضع المشارك",
+    "admin_btn_publish_results": "🏆 نشر النتائج",
+    "admin_btn_create_comp": "➕ إنشاء مسابقة جديدة",
+    "admin_btn_refresh": "🔄 تحديث",
+    "admin_btn_back": "◀️ العودة إلى لوحة التحكم",
 }

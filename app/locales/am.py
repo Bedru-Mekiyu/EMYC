@@ -104,4 +104,13 @@ MESSAGES = {
     ),
     "btn_confirm_broadcast": "✅ አረጋግጥና ላክ",
     "btn_cancel": "❌ ሰርዝ",
+    "membership_account_already_bound": "❌ ይህ የቴሌግራም አካውንት ከተረጋገጠ የEMYC አባልነት ጋር ቀድሞውኑ ተያይዟል።",
+    "admin_btn_participants": "👥 ተሳታፊዎች",
+    "admin_btn_rankings": "🏅 ደረጃዎች ይመልከቱ",
+    "admin_btn_sys_status": "💻 የስርዓት ሁኔታ",
+    "admin_btn_participant_view": "👤 የተሳታፊ እይታ",
+    "admin_btn_publish_results": "🏆 ውጤቶችን ይፋ አድርግ",
+    "admin_btn_create_comp": "➕ አዲስ ውድድር ፍጠር",
+    "admin_btn_refresh": "🔄 አድስ",
+    "admin_btn_back": "◀️ ወደ አስተዳዳሪ ተመለስ",
 }

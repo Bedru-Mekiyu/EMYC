@@ -104,4 +104,13 @@ MESSAGES = {
     ),
     "btn_confirm_broadcast": "✅ Confirm Broadcast",
     "btn_cancel": "❌ Cancel",
+    "membership_account_already_bound": "❌ This Telegram account is already linked to a verified EMYC membership.",
+    "admin_btn_participants": "👥 Participants",
+    "admin_btn_rankings": "🏅 View Rankings",
+    "admin_btn_sys_status": "💻 System Status",
+    "admin_btn_participant_view": "👤 Switch to Participant View",
+    "admin_btn_publish_results": "🏆 Publish Results",
+    "admin_btn_create_comp": "➕ Create Competition",
+    "admin_btn_refresh": "🔄 Refresh",
+    "admin_btn_back": "◀️ Back to Admin Panel",
 }
