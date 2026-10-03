@@ -19,6 +19,7 @@ from app.bot.handlers.participant import (
     cb_exam_start,
     cb_answer,
     cb_question_nav,
+    cb_exam_review,
     cb_submit_exam,
     cb_review_answers,
     handle_text_message,
@@ -81,6 +82,7 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_exam_start, pattern="^exam:start:"))
     app.add_handler(CallbackQueryHandler(cb_answer, pattern="^ans:"))
     app.add_handler(CallbackQueryHandler(cb_question_nav, pattern="^q:nav:"))
+    app.add_handler(CallbackQueryHandler(cb_exam_review, pattern="^q:rev_all:"))
     app.add_handler(CallbackQueryHandler(cb_submit_exam, pattern="^exam:submit:"))
     app.add_handler(CallbackQueryHandler(cb_review_answers, pattern="^rev:"))
 

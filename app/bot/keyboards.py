@@ -66,7 +66,7 @@ def get_question_keyboard(
     selected_opt: Optional[str] = None,
     lang: str = "en",
 ) -> InlineKeyboardMarkup:
-    """Question answer choices: A, B, C, D and Finish Examination.
+    """Question answer choices: A, B, C, D, Prev/Next navigation, Review and Submit.
     Uses compact callback under 64-byte Telegram limit: ans:<attempt_id>:<display_order>:<opt>
     """
     buttons = []
@@ -77,17 +77,54 @@ def get_question_keyboard(
 
     keyboard = [buttons]
 
-    # Action row: Navigation if questions remain + Finish Examination
-    action_row = []
+    # Row 2: Navigation - Previous & Next
+    nav_row = []
+    if display_order > 1:
+        nav_row.append(
+            InlineKeyboardButton(get_text("prev_question_btn", lang), callback_data=f"q:nav:{attempt_id}:{display_order - 1}")
+        )
     if display_order < total_questions:
-        action_row.append(
+        nav_row.append(
             InlineKeyboardButton(get_text("next_question_btn", lang), callback_data=f"q:nav:{attempt_id}:{display_order + 1}")
         )
-    action_row.append(
-        InlineKeyboardButton(get_text("finish_exam_btn", lang), callback_data=f"exam:submit:{attempt_id}")
-    )
+    if nav_row:
+        keyboard.append(nav_row)
+
+    # Row 3: Review summary & Submit exam
+    action_row = [
+        InlineKeyboardButton(get_text("review_summary_btn", lang), callback_data=f"q:rev_all:{attempt_id}:{display_order}"),
+        InlineKeyboardButton(get_text("finish_exam_btn", lang), callback_data=f"exam:submit:{attempt_id}"),
+    ]
     keyboard.append(action_row)
 
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_exam_review_keyboard(
+    attempt_id: uuid.UUID,
+    total_questions: int,
+    answered_orders: set,
+    current_display_order: int = 1,
+    lang: str = "en",
+) -> InlineKeyboardMarkup:
+    """Keyboard for in-exam review screen: quick jump buttons (rows of 5) + Return and Submit."""
+    keyboard = []
+    current_row = []
+    for i in range(1, total_questions + 1):
+        indicator = "🔘" if i in answered_orders else "⚠️"
+        btn_text = f"{i} {indicator}"
+        current_row.append(InlineKeyboardButton(btn_text, callback_data=f"q:nav:{attempt_id}:{i}"))
+        if len(current_row) == 5:
+            keyboard.append(current_row)
+            current_row = []
+    if current_row:
+        keyboard.append(current_row)
+
+    action_row = [
+        InlineKeyboardButton(get_text("review_return_btn", lang), callback_data=f"q:nav:{attempt_id}:{current_display_order}"),
+        InlineKeyboardButton(get_text("finish_exam_btn", lang), callback_data=f"exam:submit:{attempt_id}"),
+    ]
+    keyboard.append(action_row)
     return InlineKeyboardMarkup(keyboard)
 
 

@@ -66,9 +66,9 @@ def test_keyboard_layouts():
     attempt_id = uuid.uuid4()
     q_id = uuid.uuid4()
 
-    # 1. Question keyboard with 4 choices + navigation and Finish Examination
+    # 1. Question keyboard with 4 choices + navigation and Review/Finish Examination
     q_kb = get_question_keyboard(attempt_id, q_id, 1, 5, selected_opt="B", lang="en")
-    assert len(q_kb.inline_keyboard) == 2
+    assert len(q_kb.inline_keyboard) == 3
     opts_row = q_kb.inline_keyboard[0]
     assert len(opts_row) == 4
     assert opts_row[0].text == "A"
@@ -76,7 +76,8 @@ def test_keyboard_layouts():
     assert opts_row[2].text == "C"
     assert opts_row[3].text == "D"
     assert "Next Question" in q_kb.inline_keyboard[1][0].text
-    assert "Finish Examination" in q_kb.inline_keyboard[1][1].text
+    assert "Review All Answers" in q_kb.inline_keyboard[2][0].text
+    assert "Finish Examination" in q_kb.inline_keyboard[2][1].text
 
     # 2. Final question shows Finish Examination button
     q_final_kb = get_question_keyboard(attempt_id, q_id, 5, 5, selected_opt="D", lang="en")

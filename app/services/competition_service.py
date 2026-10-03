@@ -531,9 +531,22 @@ class CompetitionService:
         res = await db.execute(existing_stmt)
         existing_answer = res.scalar_one_or_none()
         if existing_answer:
+            if existing_answer.selected_display_option == selected_display_option:
+                return {
+                    "status": "already_recorded",
+                    "selected_display_option": existing_answer.selected_display_option,
+                }
+            canonical_option = order_entry.option_mapping.get(selected_display_option)
+            if not canonical_option:
+                raise CompetitionError(f"Invalid option selection: {selected_display_option}")
+            existing_answer.selected_display_option = selected_display_option
+            existing_answer.resolved_canonical_option = canonical_option
+            existing_answer.is_correct = (canonical_option == q.correct_option)
+            existing_answer.answered_at = now
+            await db.commit()
             return {
-                "status": "already_recorded",
-                "selected_display_option": existing_answer.selected_display_option,
+                "status": "updated",
+                "selected_display_option": selected_display_option,
             }
 
         canonical_option = order_entry.option_mapping.get(selected_display_option)

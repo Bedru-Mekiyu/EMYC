@@ -1273,3 +1273,119 @@ async def test_callback_data_length_under_telegram_64_byte_limit_and_compact_ans
     assert ans.selected_display_option == "A"
 
 
+@pytest.mark.asyncio
+async def test_participant_review_answers_and_bidirectional_navigation(db_session: AsyncSession):
+    """Verifies:
+    1. Bidirectional question navigation (Prev and Next buttons).
+    2. Changing an answer during the exam updates the stored answer.
+    3. In-exam review screen (cb_exam_review) displays answered/unanswered counts and jump buttons.
+    """
+    from app.bot.keyboards import get_question_keyboard
+    from app.bot.handlers.participant import cb_exam_review
+    from app.models.attempt import ParticipantAnswer
+
+    participant_user = User(id=992211, first_name="Bilal", is_bot=False)
+    p = await ParticipantService.register_or_bind_participant(
+        db=db_session,
+        telegram_user_id=992211,
+        membership_id="EMYC/9922110/2026",
+        telegram_username="bilal_test",
+        verifier=MockMembershipVerificationService(),
+    )
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Navigation & Review Exam",
+        status=CompetitionStatus.LIVE,
+        opens_at=now - timedelta(minutes=5),
+        closes_at=now + timedelta(days=1),
+        duration_minutes=20,
+        question_count=3,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    for idx in range(1, 4):
+        q = CompetitionQuestion(
+            competition_id=comp.id,
+            order_index=idx,
+            question_text=f"Question number {idx}?",
+            options={"A": "Option A", "B": "Option B", "C": "Option C", "D": "Option D"},
+            correct_option="A",
+        )
+        db_session.add(q)
+    await db_session.commit()
+
+    attempt = await CompetitionService.start_attempt(db_session, comp.id, p.id)
+
+    # 1. Verify Keyboard Navigation Buttons:
+    # Q1: Has Next, No Prev
+    kb_q1 = get_question_keyboard(attempt.id, display_order=1, total_questions=3)
+    q1_callbacks = [btn.callback_data for row in kb_q1.inline_keyboard for btn in row]
+    assert any(cb.startswith(f"q:nav:{attempt.id}:2") for cb in q1_callbacks)
+    assert not any(cb.startswith(f"q:nav:{attempt.id}:0") for cb in q1_callbacks)
+    assert any(cb.startswith(f"q:rev_all:{attempt.id}") for cb in q1_callbacks)
+
+    # Q2: Has both Prev (1) and Next (3)
+    kb_q2 = get_question_keyboard(attempt.id, display_order=2, total_questions=3)
+    q2_callbacks = [btn.callback_data for row in kb_q2.inline_keyboard for btn in row]
+    assert any(cb.startswith(f"q:nav:{attempt.id}:1") for cb in q2_callbacks)
+    assert any(cb.startswith(f"q:nav:{attempt.id}:3") for cb in q2_callbacks)
+
+    # Q3: Has Prev (2), No Next
+    kb_q3 = get_question_keyboard(attempt.id, display_order=3, total_questions=3)
+    q3_callbacks = [btn.callback_data for row in kb_q3.inline_keyboard for btn in row]
+    assert any(cb.startswith(f"q:nav:{attempt.id}:2") for cb in q3_callbacks)
+    assert not any(cb.startswith(f"q:nav:{attempt.id}:4") for cb in q3_callbacks)
+
+    # 2. Test Answering and Updating Answer:
+    # Answer Q1 with 'A'
+    res1 = await CompetitionService.submit_answer(db_session, attempt.id, display_order=1, selected_display_option="A")
+    assert res1["status"] == "recorded"
+
+    # Idempotent select 'A' again
+    res1_dup = await CompetitionService.submit_answer(db_session, attempt.id, display_order=1, selected_display_option="A")
+    assert res1_dup["status"] == "already_recorded"
+
+    # Update Q1 answer to 'C'
+    res1_update = await CompetitionService.submit_answer(db_session, attempt.id, display_order=1, selected_display_option="C")
+    assert res1_update["status"] == "updated"
+
+    # Verify updated in database
+    ans_q1_stmt = (
+        select(ParticipantAnswer.selected_display_option)
+        .where(ParticipantAnswer.attempt_id == attempt.id)
+    )
+    saved_opt = (await db_session.execute(ans_q1_stmt)).scalar()
+    assert saved_opt == "C"
+
+    # 3. Test In-Exam Review Screen via cb_exam_review
+    query_rev = MagicMock()
+    query_rev.data = f"q:rev_all:{attempt.id}:1"
+    query_rev.answer = AsyncMock()
+    query_rev.edit_message_text = AsyncMock()
+
+    update_rev = MagicMock(spec=Update)
+    update_rev.effective_user = participant_user
+    update_rev.callback_query = query_rev
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    await cb_exam_review(update_rev, context)
+
+    query_rev.edit_message_text.assert_called_once()
+    rev_text = query_rev.edit_message_text.call_args[0][0]
+    assert "Exam Progress & Answer Review" in rev_text
+    assert "1 / 3 answered" in rev_text
+    assert "Option *C* 🔘" in rev_text
+    assert "_Unanswered_ ⚠️" in rev_text
+
+    # Verify review keyboard contains quick jump buttons for all 3 questions
+    rev_kb = query_rev.edit_message_text.call_args[1]["reply_markup"]
+    jump_callbacks = [b.callback_data for row in rev_kb.inline_keyboard for b in row]
+    assert f"q:nav:{attempt.id}:1" in jump_callbacks
+    assert f"q:nav:{attempt.id}:2" in jump_callbacks
+    assert f"q:nav:{attempt.id}:3" in jump_callbacks
+    assert f"exam:submit:{attempt.id}" in jump_callbacks
+
+
+

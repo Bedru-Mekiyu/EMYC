@@ -35,12 +35,14 @@ from app.services.scoring_service import (
     ScoringAndRankingService,
     ResultsNotPublishedError,
 )
+from app.core.time_utils import now_utc, ensure_utc
 from app.bot.keyboards import (
     get_main_menu_keyboard,
     get_membership_prompt_keyboard,
     get_language_keyboard,
     get_start_exam_keyboard,
     get_question_keyboard,
+    get_exam_review_keyboard,
     get_results_keyboard,
     get_admin_confirm_announcement_keyboard,
     get_admin_create_comp_duration_keyboard,
@@ -653,7 +655,12 @@ async def render_question_screen(
     for opt_letter, opt_val in q_data["options"].items():
         options_text += f"\n*{opt_letter})* {opt_val}"
 
-    msg_body = f"{header}\n\n{q_data['question_text']}\n{options_text}"
+    answered_opt = q_data.get("already_answered_option")
+    selected_status = ""
+    if answered_opt:
+        selected_status = f"\n\n{get_text('selected_answer_text', lang, option=answered_opt)}"
+
+    msg_body = f"{header}\n\n{q_data['question_text']}\n{options_text}{selected_status}"
 
     keyboard = get_question_keyboard(
         attempt_id=attempt_id,
@@ -764,6 +771,95 @@ async def cb_question_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         p_id = participant.id
 
     await render_question_screen(query, attempt_id, display_order, lang=lang, participant_id=p_id)
+
+
+async def cb_exam_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Renders full exam progress and answer review screen before submission."""
+    query = update.callback_query
+    await query.answer()
+    user = update.effective_user
+    lang = await get_user_lang(user.id)
+    parts = query.data.split(":")
+    attempt_id = uuid.UUID(parts[2])
+    current_order = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 1
+
+    async with AsyncSessionLocal() as db:
+        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not participant:
+            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
+            return
+
+        attempt = await db.get(ExamAttempt, attempt_id)
+        if not attempt or attempt.participant_id != participant.id:
+            await query.edit_message_text("❌ Unauthorized attempt access.", reply_markup=get_main_menu_keyboard(lang))
+            return
+
+        now = now_utc()
+        deadline = ensure_utc(attempt.deadline_at)
+        if now > deadline:
+            await CompetitionService.auto_submit_expired_attempt(db, attempt)
+            await query.edit_message_text(
+                get_text("time_up_auto_submit", lang),
+                reply_markup=get_main_menu_keyboard(lang),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        # Fetch questions and answers
+        order_stmt = (
+            select(AttemptQuestionOrder.display_order, AttemptQuestionOrder.question_id)
+            .where(AttemptQuestionOrder.attempt_id == attempt_id)
+            .order_by(AttemptQuestionOrder.display_order.asc())
+        )
+        orders = (await db.execute(order_stmt)).all()
+        total_questions = len(orders)
+
+        ans_stmt = (
+            select(ParticipantAnswer.question_id, ParticipantAnswer.selected_display_option)
+            .where(ParticipantAnswer.attempt_id == attempt_id)
+        )
+        answers_map = dict((await db.execute(ans_stmt)).all())
+
+    answered_orders = set()
+    summary_lines = []
+    for disp_order, q_id in orders:
+        if q_id in answers_map:
+            answered_orders.add(disp_order)
+            summary_lines.append(f"`Q{disp_order:02d}:` Option *{answers_map[q_id]}* 🔘")
+        else:
+            summary_lines.append(f"`Q{disp_order:02d}:` _Unanswered_ ⚠️")
+
+    answered_count = len(answered_orders)
+    unanswered_count = total_questions - answered_count
+
+    time_left = max(0, int((deadline - now).total_seconds()))
+    mins, secs = divmod(time_left, 60)
+    time_str = f"{mins:02d}:{secs:02d}"
+
+    body = (
+        f"{get_text('review_title', lang)}\n\n"
+        f"{get_text('review_time', lang, time_left=time_str)}\n"
+        f"{get_text('review_progress', lang, answered=answered_count, total=total_questions, unanswered=unanswered_count)}\n\n"
+        f"*Quick Jump to Question:*\n"
+        f"🔘 = Answered | ⚠️ = Unanswered\n\n"
+    )
+
+    body += "\n".join(summary_lines[:25])
+
+    keyboard = get_exam_review_keyboard(
+        attempt_id=attempt_id,
+        total_questions=total_questions,
+        answered_orders=answered_orders,
+        current_display_order=current_order,
+        lang=lang,
+    )
+
+    try:
+        await query.edit_message_text(body, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.warning(f"Error rendering review screen with markdown: {e}")
+        plain = body.replace("*", "").replace("_", "").replace("`", "")
+        await query.edit_message_text(plain, reply_markup=keyboard)
 
 
 async def cb_submit_exam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
