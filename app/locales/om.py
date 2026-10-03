@@ -18,19 +18,22 @@ MESSAGES = {
         "4. Yeroon yoo dhumu yookiin gaaffilee hundaa yoo xumurtan ofumaan galmaa'a.\n"
         "5. Firii dorgommiin erga cufamee booda beeksifama."
     ),
+    "register_online_btn": "🌐 Miseensummaa EMYC Galmaa'aa",
     "membership_prompt": (
         "🆔 *Mirkaneessa Miseensummaa EMYC*\n\n"
         "Dorgommii kanarratti hirmaachuuf miseensa Waldaa Dargaggoota Muslimoota "
         "Itoophiyaa (EMYC) galmaa'aa ta'uun dirqama.\n\n"
-        "Miseensa galmaa'aa yoo taatan, mee Eenyummeessaa Miseensummaa keessan kallattiin asitti ergaa:\n\n"
-        "*(Hanga ammaatti hin galmoofne yoo taate, mee dura damee EMYC dhiyoo jiruun galmaa'aa.)*"
+        "🔗 *Hanga ammaatti hin galmoofne?*\n"
+        "Marsariitii keenyaan galmooftanii eenyummeessaa argachuuf liinkii gadii cuqaa:\n"
+        "https://membership.emyc.et/\n\n"
+        "📩 *Miseensa galmaa'aa yoo taatan:*\n"
+        "Mee Eenyummeessaa Miseensummaa keessan kallattiin asitti ergaa:"
     ),
     "membership_invalid_format": "❌ Eenyummeessaa miseensummaa dogoggoraa. Mee lakkoofsa sirrii mirkaneeffadhaa irra deebi'aa yaalaa.",
     "membership_not_found": (
-        "❌ Eenyummeessaan miseensummaa kun galmee EMYC keessatti hin argamne.\n\n"
-        "Hanga ammaatti miseensa Waldaa Dargaggoota Muslimoota Itoophiyaa (EMYC) hin taane yoo taatan, "
-        "mee dura karaa sirna galmee miseensummaa EMYC seera qabeessaa yookiin damee EMYC dhiyoo jiruun "
-        "miseensummaa keessan mirkaneeffadhaa."
+        "❌ Eenyummeessaan miseensummaa kun galmee keessatti hin argamne.\n\n"
+        "Mee lakkoofsa keessan sirriitti galchuu keessan mirkaneeffadhaa. Hanga ammaatti hin galmoofne yoo taate, "
+        "mee https://membership.emyc.et/ irratti galmaa'aa."
     ),
     "membership_already_bound": "❌ Eenyummeessaan miseensummaa kun akkaawuntii Telegiraamaa biraatti hidhameera.",
     "membership_verified": (

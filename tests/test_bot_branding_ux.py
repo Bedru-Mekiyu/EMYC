@@ -135,7 +135,7 @@ async def test_membership_verification_flow(db_session: AsyncSession):
     assert context.user_data.get("awaiting_membership") is True
     prompt_text = query.edit_message_text.call_args[0][0]
     assert "EMYC Membership Verification" in prompt_text
-    assert "registered members" in prompt_text
+    assert "membership.emyc.et" in prompt_text
     # Ensure format example is confidential and NOT leaked to the user
     assert "4055828" not in prompt_text
 

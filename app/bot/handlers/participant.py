@@ -31,6 +31,7 @@ from app.services.scoring_service import (
 )
 from app.bot.keyboards import (
     get_main_menu_keyboard,
+    get_membership_prompt_keyboard,
     get_language_keyboard,
     get_start_exam_keyboard,
     get_question_keyboard,
@@ -128,7 +129,11 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if not participant:
             context.user_data["awaiting_membership"] = True
             prompt = get_text("membership_prompt", lang)
-            await query.edit_message_text(prompt, parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text(
+                prompt,
+                reply_markup=get_membership_prompt_keyboard(lang),
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
 
         # 2. Registered -> Check active competition
@@ -290,9 +295,17 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                         parse_mode=ParseMode.MARKDOWN,
                     )
             except InvalidMembershipFormatError:
-                await update.message.reply_text(get_text("membership_invalid_format", lang), parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(
+                    get_text("membership_invalid_format", lang),
+                    reply_markup=get_membership_prompt_keyboard(lang),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
             except MembershipNotFoundError:
-                await update.message.reply_text(get_text("membership_not_found", lang))
+                await update.message.reply_text(
+                    get_text("membership_not_found", lang),
+                    reply_markup=get_membership_prompt_keyboard(lang),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
             except MembershipAlreadyBoundError:
                 await update.message.reply_text(get_text("membership_already_bound", lang))
             except TelegramAccountAlreadyBoundError as e:

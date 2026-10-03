@@ -18,20 +18,22 @@ MESSAGES = {
         "4. Your exam is automatically submitted when time runs out or upon final question submission.\n"
         "5. Official results will be published once the competition concludes."
     ),
+    "register_online_btn": "🌐 Register for EMYC Membership",
     "membership_prompt": (
         "🆔 *EMYC Membership Verification*\n\n"
-        "Participation in this competition is exclusively for registered members of the "
+        "To participate in this competition, you must be a registered member of the "
         "Ethiopian Muslim Youth Council (EMYC).\n\n"
-        "If you are a registered member, please send your official EMYC Membership ID "
-        "directly in this chat to verify your account:\n\n"
-        "*(If you have not registered for membership yet, please contact your local EMYC branch to register first.)*"
+        "🔗 *Not registered yet?*\n"
+        "Tap the button below to register online and receive your official Membership ID at:\n"
+        "https://membership.emyc.et/\n\n"
+        "📩 *Already registered?*\n"
+        "Please send your official EMYC Membership ID directly in this chat:"
     ),
     "membership_invalid_format": "❌ Invalid Membership ID. Please check your official EMYC ID and try again.",
     "membership_not_found": (
         "❌ Membership ID could not be found.\n\n"
-        "If you do not have an EMYC Membership ID yet, please register through the official "
-        "Ethiopian Muslim Youth Council membership registration system or contact your local "
-        "EMYC representative before attempting the examination."
+        "Please verify that you entered your ID correctly. If you have not registered yet, "
+        "please register online at https://membership.emyc.et/ before taking the exam."
     ),
     "membership_already_bound": "❌ This Membership ID is already bound to another Telegram account.",
     "membership_verified": (

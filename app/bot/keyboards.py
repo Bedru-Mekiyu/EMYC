@@ -18,6 +18,18 @@ def get_main_menu_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def get_membership_prompt_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    """Keyboard shown when prompting for membership:
+    1. 🌐 Register for EMYC Membership (URL button opening https://membership.emyc.et/)
+    2. 🔙 Main Menu (Back button)
+    """
+    keyboard = [
+        [InlineKeyboardButton(get_text("register_online_btn", lang), url="https://membership.emyc.et/")],
+        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     """Language selection keyboard: 2x2 grid with back button."""
     keyboard = [
