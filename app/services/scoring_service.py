@@ -158,16 +158,21 @@ class ScoringAndRankingService:
         if comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             raise ResultsNotPublishedError("Official results have not been published yet")
 
-        stmt = select(ExamAttempt).where(
-            and_(
-                ExamAttempt.competition_id == competition_id,
-                ExamAttempt.participant_id == participant_id,
+        stmt = (
+            select(ExamAttempt)
+            .where(
+                and_(
+                    ExamAttempt.competition_id == competition_id,
+                    ExamAttempt.participant_id == participant_id,
+                )
             )
+            .order_by(ExamAttempt.started_at.desc())
+            .limit(1)
         )
-        res = await db.execute(stmt)
-        attempt = res.scalar_one_or_none()
+        attempt = (await db.execute(stmt)).scalars().first()
         if not attempt:
             raise CompetitionError("No attempt found for this participant")
+
 
         # Format completion time
         seconds = int(attempt.completion_seconds or 0)
@@ -213,16 +218,21 @@ class ScoringAndRankingService:
         if comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             raise ResultsNotPublishedError("Answer reviews are shielded until official results publication")
 
-        stmt = select(ExamAttempt).where(
-            and_(
-                ExamAttempt.competition_id == competition_id,
-                ExamAttempt.participant_id == participant_id,
+        stmt = (
+            select(ExamAttempt)
+            .where(
+                and_(
+                    ExamAttempt.competition_id == competition_id,
+                    ExamAttempt.participant_id == participant_id,
+                )
             )
+            .order_by(ExamAttempt.started_at.desc())
+            .limit(1)
         )
-        res = await db.execute(stmt)
-        attempt = res.scalar_one_or_none()
+        attempt = (await db.execute(stmt)).scalars().first()
         if not attempt:
             raise CompetitionError("No attempt found for this participant")
+
 
         # 1. Total questions for this attempt
         tot_q_stmt = select(func.count(AttemptQuestionOrder.id)).where(
@@ -304,14 +314,18 @@ class ScoringAndRankingService:
         if comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             raise ResultsNotPublishedError("Answer reviews are shielded until official results publication")
 
-        stmt = select(ExamAttempt).where(
-            and_(
-                ExamAttempt.competition_id == competition_id,
-                ExamAttempt.participant_id == participant_id,
+        stmt = (
+            select(ExamAttempt)
+            .where(
+                and_(
+                    ExamAttempt.competition_id == competition_id,
+                    ExamAttempt.participant_id == participant_id,
+                )
             )
+            .order_by(ExamAttempt.started_at.desc())
+            .limit(1)
         )
-        res = await db.execute(stmt)
-        attempt = res.scalar_one_or_none()
+        attempt = (await db.execute(stmt)).scalars().first()
         if not attempt:
             raise CompetitionError("No attempt found for this participant")
 

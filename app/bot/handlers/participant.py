@@ -107,10 +107,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                             Competition.status.in_([CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]),
                         )
                     )
-                    .order_by(ExamAttempt.created_at.desc())
+                    .order_by(ExamAttempt.started_at.desc())
                     .limit(1)
                 )
-                published_comp_id = pub_res.scalar_one_or_none()
+                published_comp_id = pub_res.scalar()
+
     except Exception as e:
         logger.warning(f"Database error in cmd_start for user {user.id}: {e}")
 
@@ -185,123 +186,138 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     lang = await get_user_lang(user.id)
 
-    async with AsyncSessionLocal() as db:
-        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+    try:
+        async with AsyncSessionLocal() as db:
+            participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
 
-        # 1. Unregistered -> Prompt for Membership ID
-        if not participant:
-            context.user_data["awaiting_membership"] = True
-            prompt = get_text("membership_prompt", lang)
-            await query.edit_message_text(
-                prompt,
-                reply_markup=get_membership_prompt_keyboard(lang),
-                parse_mode=ParseMode.MARKDOWN,
-            )
-            return
+            # 1. Unregistered -> Prompt for Membership ID
+            if not participant:
+                context.user_data["awaiting_membership"] = True
+                prompt = get_text("membership_prompt", lang)
+                await query.edit_message_text(
+                    prompt,
+                    reply_markup=get_membership_prompt_keyboard(lang),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
 
-        # 2. Registered -> Check active competition
-        comp = await CompetitionService.get_active_competition(db)
-        if not comp:
-            # Check if participant has an attempt for the latest completed/published competition
-            latest_attempt_stmt = (
-                select(ExamAttempt, Competition)
-                .join(Competition, ExamAttempt.competition_id == Competition.id)
-                .where(ExamAttempt.participant_id == participant.id)
-                .order_by(ExamAttempt.created_at.desc())
-                .limit(1)
-            )
-            latest_res = await db.execute(latest_attempt_stmt)
-            latest_row = latest_res.first()
+            # 2. Registered -> Check active competition
+            comp = await CompetitionService.get_active_competition(db)
+            if not comp:
+                # Check if participant has an attempt for the latest completed/published competition
+                latest_attempt_stmt = (
+                    select(ExamAttempt, Competition)
+                    .join(Competition, ExamAttempt.competition_id == Competition.id)
+                    .where(ExamAttempt.participant_id == participant.id)
+                    .order_by(ExamAttempt.started_at.desc())
+                    .limit(1)
+                )
+                latest_res = await db.execute(latest_attempt_stmt)
+                latest_row = latest_res.first()
 
-            if latest_row:
-                prev_attempt, prev_comp = latest_row
-                name = get_participant_display_name(update)
-                if prev_comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
-                    await render_participant_result_screen(query, prev_comp.id, participant.id, lang, name)
+                if latest_row:
+                    prev_attempt, prev_comp = latest_row
+                    name = get_participant_display_name(update)
+                    if prev_comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+                        await render_participant_result_screen(query, prev_comp.id, participant.id, lang, name)
+                        return
+
+                    elif prev_attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]:
+                        text = get_text("results_pending_notice", lang)
+                        kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                        return
+
+                from app.core.config import get_settings
+                if get_settings().is_admin(user.id):
+                    admin_hint = (
+                        "⏳ *No competition is currently LIVE.*\n\n"
+                        "👑 As an administrator, you can configure questions and set a competition to `LIVE` via the Admin Dashboard."
+                    )
+                    kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")],
+                        [InlineKeyboardButton("🔙 Main Menu", callback_data="menu:home")],
+                    ])
+                    await query.edit_message_text(admin_hint, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
                     return
 
-                elif prev_attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]:
+                text = get_text("competition_not_open", lang, opens_at="Soon", closes_at="TBA")
+                await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang))
+                return
+
+            # 3. Check existing attempt for this competition
+            stmt = (
+                select(ExamAttempt)
+                .where(
+                    and_(
+                        ExamAttempt.competition_id == comp.id,
+                        ExamAttempt.participant_id == participant.id,
+                    )
+                )
+                .order_by(ExamAttempt.started_at.desc())
+                .limit(1)
+            )
+            attempt = (await db.execute(stmt)).scalars().first()
+
+
+            if attempt:
+                # If in progress, resume where they left off (first unanswered question)
+                if attempt.status == AttemptStatus.IN_PROGRESS:
+                    ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
+                    ans_ids = set((await db.execute(ans_stmt)).scalars().all())
+
+                    order_stmt = (
+                        select(AttemptQuestionOrder.display_order)
+                        .where(
+                            and_(
+                                AttemptQuestionOrder.attempt_id == attempt.id,
+                                ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
+                            )
+                        )
+                        .order_by(AttemptQuestionOrder.display_order.asc())
+                        .limit(1)
+                    )
+                    first_unanswered = (await db.execute(order_stmt)).scalar() or 1
+                    await render_question_screen(query, attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
+                    return
+
+                # If already submitted / finished:
+                name = get_participant_display_name(update)
+                if comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+                    await render_participant_result_screen(query, comp.id, participant.id, lang, name)
+                    return
+
+                else:
+                    # Results pending
                     text = get_text("results_pending_notice", lang)
                     kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
                     await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
                     return
 
-            from app.core.config import get_settings
-            if get_settings().is_admin(user.id):
-                admin_hint = (
-                    "⏳ *No competition is currently LIVE.*\n\n"
-                    "👑 As an administrator, you can configure questions and set a competition to `LIVE` via the Admin Dashboard."
-                )
-                kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")],
-                    [InlineKeyboardButton("🔙 Main Menu", callback_data="menu:home")],
-                ])
-                await query.edit_message_text(admin_hint, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                return
-
-            text = get_text("competition_not_open", lang, opens_at="Soon", closes_at="TBA")
-            await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang))
-            return
-
-        # 3. Check existing attempt for this competition
-        stmt = select(ExamAttempt).where(
-            and_(
-                ExamAttempt.competition_id == comp.id,
-                ExamAttempt.participant_id == participant.id,
+            # 4. No attempt yet -> Show competition summary and Start Competition button
+            exam_info_text = get_text(
+                "exam_info",
+                lang,
+                title=comp.title,
+                questions=comp.question_count,
+                duration=comp.duration_minutes,
+                opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
+                closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
             )
-        )
-        res = await db.execute(stmt)
-        attempt = res.scalar_one_or_none()
-
-        if attempt:
-            # If in progress, resume where they left off (first unanswered question)
-            if attempt.status == AttemptStatus.IN_PROGRESS:
-                ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
-                ans_ids = set((await db.execute(ans_stmt)).scalars().all())
-
-                order_stmt = (
-                    select(AttemptQuestionOrder.display_order)
-                    .where(
-                        and_(
-                            AttemptQuestionOrder.attempt_id == attempt.id,
-                            ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
-                        )
-                    )
-                    .order_by(AttemptQuestionOrder.display_order.asc())
-                    .limit(1)
-                )
-                first_unanswered = (await db.execute(order_stmt)).scalar() or 1
-                await render_question_screen(query, attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
-                return
-
-            # If already submitted / finished:
-            name = get_participant_display_name(update)
-            if comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
-                await render_participant_result_screen(query, comp.id, participant.id, lang, name)
-                return
-
-            else:
-                # Results pending
-                text = get_text("results_pending_notice", lang)
-                kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-                await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                return
-
-        # 4. No attempt yet -> Show competition summary and Start Competition button
-        exam_info_text = get_text(
-            "exam_info",
-            lang,
-            title=comp.title,
-            questions=comp.question_count,
-            duration=comp.duration_minutes,
-            opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
-            closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
-        )
-        await query.edit_message_text(
-            exam_info_text,
-            reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
-            parse_mode=ParseMode.MARKDOWN,
-        )
+            await query.edit_message_text(
+                exam_info_text,
+                reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+    except Exception as e:
+        logger.error(f"Error in cb_start_flow for user {user.id}: {e}", exc_info=True)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+        fallback_msg = "⚠️ An unexpected error occurred while processing your request. Please try again from the menu."
+        try:
+            await query.edit_message_text(fallback_msg, reply_markup=kb)
+        except Exception:
+            if query.message:
+                await query.message.reply_text(fallback_msg, reply_markup=kb)
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -657,13 +673,19 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await render_question_screen(query, attempt.id, display_order=1, lang=lang, participant_id=participant.id)
         except DuplicateAttemptError:
             # Check existing attempt: if IN_PROGRESS, resume it directly!
-            stmt = select(ExamAttempt).where(
-                and_(
-                    ExamAttempt.competition_id == comp_id,
-                    ExamAttempt.participant_id == participant.id,
+            stmt = (
+                select(ExamAttempt)
+                .where(
+                    and_(
+                        ExamAttempt.competition_id == comp_id,
+                        ExamAttempt.participant_id == participant.id,
+                    )
                 )
+                .order_by(ExamAttempt.started_at.desc())
+                .limit(1)
             )
-            existing_attempt = (await db.execute(stmt)).scalar_one_or_none()
+            existing_attempt = (await db.execute(stmt)).scalars().first()
+
             if existing_attempt and existing_attempt.status == AttemptStatus.IN_PROGRESS:
                 ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == existing_attempt.id)
                 ans_ids = set((await db.execute(ans_stmt)).scalars().all())
