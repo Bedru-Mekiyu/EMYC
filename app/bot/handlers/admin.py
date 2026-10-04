@@ -550,23 +550,38 @@ async def cb_admin_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             user_ids = list((await db.execute(part_stmt)).scalars().all())
 
             sent_count = 0
+            safe_comp_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
+            notify_text = (
+                f"🏆 *EMYC Competition Results Published!*\n\n"
+                f"Official results for *{safe_comp_title}* are now available.\n"
+                f"Tap below to view your score and ranking!"
+            )
+            notify_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 View Result", callback_data=f"rev:my_result:{comp_id}")]
+            ])
+
             for uid in user_ids:
                 try:
                     await context.bot.send_message(
                         chat_id=uid,
-                        text=(
-                            f"🏆 *EMYC Competition Results Published!*\n\n"
-                            f"Official results for *{comp.title}* are now available.\n"
-                            f"Tap below to view your score and ranking!"
-                        ),
-                        reply_markup=InlineKeyboardMarkup([
-                            [InlineKeyboardButton("📊 View Result", callback_data="menu:start")]
-                        ]),
+                        text=notify_text,
+                        reply_markup=notify_kb,
                         parse_mode=ParseMode.MARKDOWN,
                     )
                     sent_count += 1
                 except Exception as e:
-                    logger.warning(f"Failed to deliver result notification to user {uid}: {e}")
+                    logger.warning(f"Error sending markdown result notification to {uid}: {e}")
+                    try:
+                        plain = notify_text.replace("*", "").replace("_", "").replace("`", "")
+                        await context.bot.send_message(
+                            chat_id=uid,
+                            text=plain,
+                            reply_markup=notify_kb,
+                        )
+                        sent_count += 1
+                    except Exception as e2:
+                        logger.warning(f"Failed to deliver fallback result notification to user {uid}: {e2}")
+
 
             # Record announcement
             announcement = Announcement(

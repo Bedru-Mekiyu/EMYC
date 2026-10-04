@@ -1043,49 +1043,87 @@ async def render_participant_result_screen(
     user_display_name: str,
 ) -> None:
     """Renders the official personal result screen for a participant strictly guarded by publication status."""
+    kb_back = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+
     async with AsyncSessionLocal() as db:
         comp = await db.get(Competition, competition_id)
         if not comp or comp.status != CompetitionStatus.PUBLISHED:
             text = get_text("results_pending_notice", lang)
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-            if hasattr(target, "edit_message_text"):
-                await target.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-            else:
-                await target.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            try:
+                if hasattr(target, "edit_message_text"):
+                    await target.edit_message_text(text, reply_markup=kb_back, parse_mode=ParseMode.MARKDOWN)
+                else:
+                    await target.reply_text(text, reply_markup=kb_back, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                plain = text.replace("*", "").replace("_", "").replace("`", "")
+                if hasattr(target, "edit_message_text"):
+                    await target.edit_message_text(plain, reply_markup=kb_back)
+                else:
+                    await target.reply_text(plain, reply_markup=kb_back)
             return
 
-        result_data = await ScoringAndRankingService.get_participant_result(db, competition_id, participant_id)
+        result_data = None
+        try:
+            result_data = await ScoringAndRankingService.get_participant_result(db, competition_id, participant_id)
+        except Exception as e:
+            logger.warning(f"Could not retrieve participant result (comp={competition_id}, participant={participant_id}): {e}")
+
         if not result_data:
             text = get_text("results_pending_notice", lang)
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-            if hasattr(target, "edit_message_text"):
-                await target.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-            else:
-                await target.reply_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            try:
+                if hasattr(target, "edit_message_text"):
+                    await target.edit_message_text(text, reply_markup=kb_back, parse_mode=ParseMode.MARKDOWN)
+                else:
+                    await target.reply_text(text, reply_markup=kb_back, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                plain = text.replace("*", "").replace("_", "").replace("`", "")
+                if hasattr(target, "edit_message_text"):
+                    await target.edit_message_text(plain, reply_markup=kb_back)
+                else:
+                    await target.reply_text(plain, reply_markup=kb_back)
             return
 
-        total_q = result_data["total_questions"]
-        score = result_data["score"]
-        percent = round((score / total_q) * 100, 1) if total_q else 0
+        total_q = result_data.get("total_questions") or comp.question_count or 0
+        raw_score = result_data.get("score")
+        score = raw_score if raw_score is not None else 0
+        percent = round((score / total_q) * 100, 1) if (total_q and total_q > 0) else 0
         total_participants = result_data.get("total_participants") or 1
+        rank = result_data.get("rank") if result_data.get("rank") is not None else "-"
+        time_taken = result_data.get("completion_time") or "00:00"
+
+        safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
+        safe_name = user_display_name.replace("*", "").replace("_", " ").replace("`", "")
 
         res_text = get_text(
             "results_title",
             lang,
-            title=comp.title,
-            full_name=user_display_name,
+            title=safe_title,
+            full_name=safe_name,
             score=score,
             total=total_q,
             percent=percent,
-            rank=result_data["rank"],
+            rank=rank,
             total_participants=total_participants,
-            time=result_data["completion_time"],
+            time=time_taken,
         )
         kb = get_results_keyboard(comp.id, lang=lang)
-        if hasattr(target, "edit_message_text"):
-            await target.edit_message_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-        else:
-            await target.reply_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        try:
+            if hasattr(target, "edit_message_text"):
+                await target.edit_message_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await target.reply_text(res_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.warning(f"Error rendering result screen with markdown: {e}")
+            plain = res_text.replace("*", "").replace("_", "").replace("`", "")
+            try:
+                if hasattr(target, "edit_message_text"):
+                    await target.edit_message_text(plain, reply_markup=kb)
+                else:
+                    await target.reply_text(plain, reply_markup=kb)
+            except Exception as e2:
+                logger.error(f"Fallback result editing failed: {e2}")
+                if hasattr(target, "message") and target.message:
+                    await target.message.reply_text(plain, reply_markup=kb)
 
 
 async def cb_participant_my_result(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1104,7 +1142,18 @@ async def cb_participant_my_result(update: Update, context: ContextTypes.DEFAULT
             return
         p_id = participant.id
 
-    await render_participant_result_screen(query, comp_id, p_id, lang, name)
+    try:
+        await render_participant_result_screen(query, comp_id, p_id, lang, name)
+    except Exception as e:
+        logger.error(f"Error in cb_participant_my_result for user {user.id}: {e}", exc_info=True)
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+        text = get_text("results_pending_notice", lang)
+        try:
+            await query.edit_message_text(text, reply_markup=kb)
+        except Exception:
+            if query.message:
+                await query.message.reply_text(text, reply_markup=kb)
+
 
 
 async def cb_participant_answer_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

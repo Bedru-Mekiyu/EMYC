@@ -1685,5 +1685,65 @@ async def test_strict_publication_gate_and_1_question_review_flow(db_session: As
     assert "menu:home" in res_callbacks
 
 
+@pytest.mark.asyncio
+async def test_render_participant_result_screen_graceful_fallbacks(db_session: AsyncSession):
+    """Verifies that render_participant_result_screen handles null scores and Telegram Markdown failures cleanly."""
+    from app.bot.handlers.participant import render_participant_result_screen
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Competition_With_Underscores_And*Stars",
+        status=CompetitionStatus.PUBLISHED,
+        opens_at=now - timedelta(days=2),
+        closes_at=now - timedelta(days=1),
+        duration_minutes=30,
+        question_count=10,
+    )
+    part = Participant(
+        telegram_user_id=889988,
+        membership_id="EMYC/889988/2026",
+        language_code="en",
+    )
+
+    db_session.add_all([comp, part])
+    await db_session.flush()
+
+    att = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=part.id,
+        status=AttemptStatus.FINALIZED,
+        started_at=now - timedelta(hours=3),
+        deadline_at=now - timedelta(hours=2),
+        score=None,  # Null score to test division guard
+        rank=None,   # Null rank
+        completion_seconds=None,
+    )
+    db_session.add(att)
+    await db_session.commit()
+
+    # Mock query where first edit_message_text with MARKDOWN raises Telegram error
+    mock_query = MagicMock()
+    mock_query.edit_message_text = AsyncMock(side_effect=[
+        Exception("BadRequest: Can't parse entities"),
+        None,  # Second call (plain text fallback) succeeds
+    ])
+
+    await render_participant_result_screen(
+        target=mock_query,
+        competition_id=comp.id,
+        participant_id=part.id,
+        lang="en",
+        user_display_name="User_With_Special*Chars",
+    )
+
+    # edit_message_text should be called twice: 1st failed, 2nd succeeded with plain text
+    assert mock_query.edit_message_text.call_count == 2
+    plain_call = mock_query.edit_message_text.call_args_list[1]
+    plain_text = plain_call[0][0]
+    assert "Score: 0 / 10" in plain_text
+    assert "Rank: #-" in plain_text
+
+
+
 
 

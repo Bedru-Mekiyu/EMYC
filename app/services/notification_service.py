@@ -34,15 +34,16 @@ class NotificationService:
         participants = list(res.scalars().all())
 
         sent_count = 0
+        safe_title = competition.title.replace("*", "").replace("_", " ").replace("`", "")
         for p in participants:
             lang = p.language_code or "en"
             msg = (
-                f"🏆 *{get_text('results_title', lang, score='...', total=competition.question_count, rank='...', time='...').splitlines()[0]}*\n\n"
-                f"Official results for *{competition.title}* have been published!\n"
+                f"🏆 *EMYC Competition Results*\n\n"
+                f"Official results for *{safe_title}* have been published!\n"
                 f"Tap the button below to view your score, rank, and answer review."
             )
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton(get_text("view_result_btn", lang), callback_data="menu:start")]
+                [InlineKeyboardButton(get_text("view_result_btn", lang), callback_data=f"rev:my_result:{competition.id}")]
             ])
             try:
                 await bot_app.bot.send_message(
@@ -53,7 +54,18 @@ class NotificationService:
                 )
                 sent_count += 1
             except Exception as e:
-                logger.warning(f"Could not deliver notification to telegram_user_id={p.telegram_user_id}: {e}")
+                logger.warning(f"Markdown delivery failed for user {p.telegram_user_id}: {e}")
+                try:
+                    plain = msg.replace("*", "").replace("_", "").replace("`", "")
+                    await bot_app.bot.send_message(
+                        chat_id=p.telegram_user_id,
+                        text=plain,
+                        reply_markup=keyboard,
+                    )
+                    sent_count += 1
+                except Exception as e2:
+                    logger.warning(f"Could not deliver notification to telegram_user_id={p.telegram_user_id}: {e2}")
+
 
         # Store audit announcement record
         announcement = Announcement(
