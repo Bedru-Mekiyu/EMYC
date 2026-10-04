@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -425,7 +426,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                         )
                         await update.message.reply_text(
                             prompt,
-                            reply_markup=get_admin_create_comp_schedule_keyboard(),
+                            reply_markup=get_admin_create_comp_schedule_keyboard(lang=lang),
                             parse_mode=ParseMode.MARKDOWN,
                         )
                         return
@@ -434,6 +435,68 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
                 await update.message.reply_text(err_text, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
                 return
+
+            if step == "custom_schedule":
+                from app.core.time_utils import parse_window_string, format_timedelta_friendly
+                td = parse_window_string(text)
+                if td is not None:
+                    now = datetime.now(timezone.utc)
+                    wizard["opens_at"] = now
+                    wizard["closes_at"] = now + td
+                    wizard["step"] = "questions"
+                    sched_label = format_timedelta_friendly(td)
+                    prompt = (
+                        f"📝 *Create New EMYC Competition: Question Setup*\n\n"
+                        f"*Title:* {wizard.get('title', 'Competition')}\n"
+                        f"*Duration:* {wizard.get('duration', 30)} minutes\n"
+                        f"*Closes in:* {sched_label}\n\n"
+                        f"How would you like to configure questions for this competition?"
+                    )
+                    from app.bot.keyboards import get_admin_create_comp_questions_keyboard
+                    await update.message.reply_text(
+                        prompt,
+                        reply_markup=get_admin_create_comp_questions_keyboard(),
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                    return
+
+                err_text = get_text("admin_custom_sched_invalid", lang)
+                cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
+                await update.message.reply_text(err_text, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+    # Case B.2: Admin editing existing competition schedule window
+    if context.user_data.get("editing_sched_comp_id"):
+        from app.core.config import get_settings
+        if get_settings().is_admin(user.id):
+            comp_id_str = context.user_data["editing_sched_comp_id"]
+            from app.core.time_utils import parse_window_string, format_timedelta_friendly
+            td = parse_window_string(text)
+            lang = context.user_data.get("admin_lang", "en")
+            if td is not None:
+                context.user_data.pop("editing_sched_comp_id", None)
+                now = datetime.now(timezone.utc)
+                async with AsyncSessionLocal() as db:
+                    comp = await db.get(Competition, uuid.UUID(comp_id_str))
+                    if comp:
+                        if comp.status == CompetitionStatus.LIVE:
+                            comp.closes_at = now + td
+                        else:
+                            comp.opens_at = now
+                            comp.closes_at = now + td
+                        await db.commit()
+                sched_label = format_timedelta_friendly(td)
+                await update.message.reply_text(
+                    f"✅ *Schedule Updated!*\n\nCompetition open window is now set to *{sched_label}*.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+            err_text = get_text("admin_custom_sched_invalid", lang)
+            cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")]])
+            await update.message.reply_text(err_text, reply_markup=cancel_kb, parse_mode=ParseMode.MARKDOWN)
+            return
 
     # Case C: Admin interactive question authoring wizard (5 steps)
     if context.user_data.get("q_wizard") or context.user_data.get("awaiting_question_comp_id"):

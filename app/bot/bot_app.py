@@ -44,6 +44,8 @@ from app.bot.handlers.admin import (
     cb_admin_participants,
     cb_admin_rankings,
     cb_admin_sys_status,
+    cb_admin_edit_schedule,
+    cb_admin_apply_schedule,
     cb_admin_create_comp_start,
     cb_admin_create_duration,
     cb_admin_create_schedule,
@@ -114,6 +116,8 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_rankings, pattern="^admin:rankings(:.*)?$"))
     app.add_handler(CallbackQueryHandler(cb_admin_sys_status, pattern="^admin:sys_status$"))
     app.add_handler(CallbackQueryHandler(cb_admin_competition, pattern="^admin:competition$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_edit_schedule, pattern="^admin:edit_sched:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_apply_schedule, pattern="^admin:apply_sched:"))
     app.add_handler(CallbackQueryHandler(cb_admin_create_comp_start, pattern="^admin:create_comp:start$"))
     app.add_handler(CallbackQueryHandler(cb_admin_create_duration, pattern="^admin:create_dur:"))
     app.add_handler(CallbackQueryHandler(cb_admin_create_schedule, pattern="^admin:create_sched:"))

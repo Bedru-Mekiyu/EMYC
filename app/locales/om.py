@@ -109,6 +109,18 @@ MESSAGES = {
         "Fakkeenya: `45` yookiin `75` yookiin `90`"
     ),
     "admin_custom_dur_invalid": "⚠️ Mee daqiiqaa 1 hanga 1440 gidduutti lakkoofsa sirrii galchaa (fakkeenyaaf: 45).",
+    "admin_btn_custom_sched": "✏️ Yeroo Banaa Addaa",
+    "admin_custom_sched_prompt": (
+        "⏳ *Yeroo Banaa Dorgommii Addaa*\n\n"
+        "Dorgommiin yeroo hammamiif banamaa akka turu galchaa.\n\n"
+        "Sa'aatii yookiin guyyoota galchuu dandeessu:\n"
+        "• `2h` yookiin `4 hours` (fakkeenya: 2, 4, 12 sa'aatii)\n"
+        "• `3d` yookiin `5 days` (fakkeenya: 3, 5 guyyoota)\n"
+        "• `1d 12h`\n"
+        "• Yookiin lakkoofsa sa'aatii qofa (fakkeenya: `6`)\n\n"
+        "_Yeroo banaa barbaaddan barruudhaan ergaa:_"
+    ),
+    "admin_custom_sched_invalid": "⚠️ Mee yeroo banaa sirrii galchaa (fakkeenyaaf: `4h`, `2d`, `12` sa'aatii).",
     "admin_results_dash": (
         "📊 *Bu'aalee Dorgommii*\n\n"
         "🏆 *{title}*\n\n"

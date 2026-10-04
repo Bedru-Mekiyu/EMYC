@@ -109,6 +109,18 @@ MESSAGES = {
         "Example: `45` or `75` or `90`"
     ),
     "admin_custom_dur_invalid": "⚠️ Please enter a valid duration between 1 and 1440 minutes (e.g., 45).",
+    "admin_btn_custom_sched": "✏️ Custom Open Window",
+    "admin_custom_sched_prompt": (
+        "⏳ *Custom Competition Open Window*\n\n"
+        "Please enter how long the competition should remain open.\n\n"
+        "You can enter hours or days, for example:\n"
+        "• `2h` or `4 hours`\n"
+        "• `3d` or `5 days`\n"
+        "• `1d 12h`\n"
+        "• Or simply a number of hours (e.g. `6`)\n\n"
+        "_Send your desired open window as a text reply:_"
+    ),
+    "admin_custom_sched_invalid": "⚠️ *Invalid Window Format*\nPlease enter a valid open window (e.g., `4h`, `2d`, `12` hours).",
     "admin_results_dash": (
         "📊 *Competition Results*\n\n"
         "🏆 *{title}*\n\n"

@@ -126,3 +126,66 @@ def format_meta_line(duration_minutes: int, question_count: int) -> str:
     dur = format_friendly_duration(duration_minutes)
     q = format_friendly_questions(question_count)
     return f"{dur} · {q}"
+
+
+def parse_window_string(raw: str) -> Optional[timedelta]:
+    """Parses human-entered window string into a timedelta.
+    
+    Accepts:
+    - Pure number: e.g. '6' -> 6 hours
+    - Hours: '2h', '4 hours', '12 hrs'
+    - Days: '2d', '3 days', '5 day'
+    - Weeks: '1w', '2 weeks'
+    - Minutes: '30m', '45 mins'
+    - Mixed: '1d 12h', '2 days 4 hours'
+    """
+    import re
+
+    raw = raw.strip().lower()
+    if not raw:
+        return None
+
+    if raw.isdigit():
+        val = int(raw)
+        if 1 <= val <= 720:  # 1 hour to 30 days
+            return timedelta(hours=val)
+        return None
+
+    pattern = (
+        r"^(?:(\d+)\s*(?:w|week|weeks))?\s*"
+        r"(?:(\d+)\s*(?:d|day|days))?\s*"
+        r"(?:(\d+)\s*(?:h|hr|hrs|hour|hours))?\s*"
+        r"(?:(\d+)\s*(?:m|min|mins|minute|minutes))?$"
+    )
+    match = re.match(pattern, raw)
+    if match and any(match.groups()):
+        w, d, h, m = match.groups()
+        td = timedelta(
+            weeks=int(w or 0),
+            days=int(d or 0),
+            hours=int(h or 0),
+            minutes=int(m or 0),
+        )
+        # Minimum 5 minutes, maximum 365 days
+        if 300 <= td.total_seconds() <= 86400 * 365:
+            return td
+    return None
+
+
+def format_timedelta_friendly(td: timedelta) -> str:
+    """Formats a timedelta into a concise human-friendly string (e.g. '4 hours', '2 days', '1d 12h')."""
+    total_secs = int(td.total_seconds())
+    hours, rem = divmod(total_secs, 3600)
+    days, hours = divmod(hours, 24)
+    if days > 0 and hours > 0:
+        return f"{days}d {hours}h"
+    elif days > 0:
+        unit = "day" if days == 1 else "days"
+        return f"{days} {unit}"
+    elif hours > 0:
+        unit = "hour" if hours == 1 else "hours"
+        return f"{hours} {unit}"
+    else:
+        mins = max(1, rem // 60)
+        unit = "minute" if mins == 1 else "minutes"
+        return f"{mins} {unit}"

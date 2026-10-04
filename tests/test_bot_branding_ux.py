@@ -342,6 +342,24 @@ def test_human_readable_schedule_and_duration_formatters():
     window_sameday = format_schedule_window(now, same_day_end, now=now)
     assert window_sameday == "Today, 2:00 PM → 4:00 PM"
 
+    # 5. Test parse_window_string & format_timedelta_friendly
+    from app.core.time_utils import parse_window_string, format_timedelta_friendly
+    assert parse_window_string("2h") == timedelta(hours=2)
+    assert parse_window_string("4 hours") == timedelta(hours=4)
+    assert parse_window_string("3d") == timedelta(days=3)
+    assert parse_window_string("5 days") == timedelta(days=5)
+    assert parse_window_string("1d 12h") == timedelta(days=1, hours=12)
+    assert parse_window_string("2 weeks") == timedelta(weeks=2)
+    assert parse_window_string("30 mins") == timedelta(minutes=30)
+    assert parse_window_string("6") == timedelta(hours=6)
+    assert parse_window_string("invalid_input") is None
+    assert parse_window_string("0") is None
+
+    assert format_timedelta_friendly(timedelta(hours=4)) == "4 hours"
+    assert format_timedelta_friendly(timedelta(days=2)) == "2 days"
+    assert format_timedelta_friendly(timedelta(days=1, hours=12)) == "1d 12h"
+    assert format_timedelta_friendly(timedelta(minutes=30)) == "30 minutes"
+
 
 @pytest.mark.asyncio
 async def test_participant_exam_info_screen_human_readable(db_session: AsyncSession):

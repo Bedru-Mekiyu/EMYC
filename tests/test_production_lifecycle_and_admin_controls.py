@@ -35,6 +35,8 @@ from app.bot.handlers.admin import (
     cb_admin_archive,
     cb_admin_finalize,
     cb_admin_publish,
+    cb_admin_edit_schedule,
+    cb_admin_apply_schedule,
 )
 from app.bot.handlers.participant import (
     cb_start_flow,
@@ -290,6 +292,148 @@ async def test_admin_create_competition_interactive_wizard(db_session: AsyncSess
         select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp.id)
     )).scalar()
     assert q_count == 20
+
+
+@pytest.mark.asyncio
+async def test_admin_create_competition_custom_schedule_window(db_session: AsyncSession):
+    """Verifies that an admin can specify a custom open window during competition creation."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {
+        "create_comp": {
+            "title": "Custom Window Challenge",
+            "description": "Challenging competition",
+            "duration": 45,
+            "step": "schedule",
+        }
+    }
+
+    # 1. Admin selects custom schedule option
+    query_sched = MagicMock()
+    query_sched.data = "admin:create_sched:custom"
+    query_sched.answer = AsyncMock()
+    query_sched.edit_message_text = AsyncMock()
+    update_sched = MagicMock(spec=Update)
+    update_sched.effective_user = admin_user
+    update_sched.callback_query = query_sched
+
+    await cb_admin_create_schedule(update_sched, context)
+    assert context.user_data["create_comp"]["step"] == "custom_schedule"
+    query_sched.edit_message_text.assert_called_once()
+    assert "Custom Competition Open Window" in query_sched.edit_message_text.call_args[0][0]
+
+    # 2. Admin submits invalid open window text
+    msg_inv = MagicMock()
+    msg_inv.text = "invalid_duration"
+    msg_inv.reply_text = AsyncMock()
+    update_inv = MagicMock(spec=Update)
+    update_inv.effective_user = admin_user
+    update_inv.message = msg_inv
+
+    await handle_text_message(update_inv, context)
+    msg_inv.reply_text.assert_called_once()
+    assert "Invalid" in msg_inv.reply_text.call_args[0][0]
+    assert context.user_data["create_comp"]["step"] == "custom_schedule"
+
+    # 3. Admin submits valid custom open window: "4 hours"
+    msg_val = MagicMock()
+    msg_val.text = "4 hours"
+    msg_val.reply_text = AsyncMock()
+    update_val = MagicMock(spec=Update)
+    update_val.effective_user = admin_user
+    update_val.message = msg_val
+
+    await handle_text_message(update_val, context)
+    assert context.user_data["create_comp"]["step"] == "questions"
+    msg_val.reply_text.assert_called_once()
+    assert "*Closes in:* 4 hours" in msg_val.reply_text.call_args[0][0]
+
+    # 4. Attach Standard Questions to finalize creation
+    query_q = MagicMock()
+    query_q.data = "admin:create_q:standard"
+    query_q.answer = AsyncMock()
+    query_q.edit_message_text = AsyncMock()
+    update_q = MagicMock(spec=Update)
+    update_q.effective_user = admin_user
+    update_q.callback_query = query_q
+
+    await cb_admin_create_questions(update_q, context)
+
+    # Verify competition in DB with custom window
+    stmt = select(Competition).where(Competition.title == "Custom Window Challenge")
+    comp = (await db_session.execute(stmt)).scalar_one_or_none()
+    assert comp is not None
+    diff = comp.closes_at - comp.opens_at
+    assert abs(diff.total_seconds() - 4 * 3600) < 60
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_existing_competition_schedule(db_session: AsyncSession):
+    """Verifies that an admin can edit and customize the open window of an existing competition."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Olympiad To Edit",
+        status=CompetitionStatus.DRAFT,
+        opens_at=now,
+        closes_at=now + timedelta(days=7),
+        duration_minutes=60,
+        question_count=20,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    # 1. Admin triggers edit schedule from competition screen
+    query_edit = MagicMock()
+    query_edit.data = f"admin:edit_sched:{comp.id}"
+    query_edit.answer = AsyncMock()
+    query_edit.edit_message_text = AsyncMock()
+    update_edit = MagicMock(spec=Update)
+    update_edit.effective_user = admin_user
+    update_edit.callback_query = query_edit
+
+    await cb_admin_edit_schedule(update_edit, context)
+    query_edit.edit_message_text.assert_called_once()
+    assert "Edit Competition Schedule" in query_edit.edit_message_text.call_args[0][0]
+
+    # 2. Admin selects custom window
+    query_custom = MagicMock()
+    query_custom.data = f"admin:apply_sched:{comp.id}:custom"
+    query_custom.answer = AsyncMock()
+    query_custom.edit_message_text = AsyncMock()
+    update_custom = MagicMock(spec=Update)
+    update_custom.effective_user = admin_user
+    update_custom.callback_query = query_custom
+
+    await cb_admin_apply_schedule(update_custom, context)
+    assert context.user_data["editing_sched_comp_id"] == str(comp.id)
+
+    # 3. Admin submits "12 hours" via text
+    msg = MagicMock()
+    msg.text = "12 hours"
+    msg.reply_text = AsyncMock()
+    update_msg = MagicMock(spec=Update)
+    update_msg.effective_user = admin_user
+    update_msg.message = msg
+
+    await handle_text_message(update_msg, context)
+    msg.reply_text.assert_called_once()
+    assert "Schedule Updated!" in msg.reply_text.call_args[0][0]
+    assert "12 hours" in msg.reply_text.call_args[0][0]
+
+    # 4. Verify updated closes_at in database
+    await db_session.refresh(comp)
+    diff = comp.closes_at - comp.opens_at
+    assert abs(diff.total_seconds() - 12 * 3600) < 60
 
 
 @pytest.mark.asyncio

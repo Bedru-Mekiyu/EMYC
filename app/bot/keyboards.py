@@ -307,7 +307,7 @@ def get_admin_create_comp_duration_keyboard(lang: str = "en") -> InlineKeyboardM
     ])
 
 
-def get_admin_create_comp_schedule_keyboard() -> InlineKeyboardMarkup:
+def get_admin_create_comp_schedule_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     """Interactive schedule window selector during competition creation."""
     return InlineKeyboardMarkup([
         [
@@ -318,7 +318,10 @@ def get_admin_create_comp_schedule_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📅 7 Days", callback_data="admin:create_sched:7d"),
             InlineKeyboardButton("📅 14 Days", callback_data="admin:create_sched:14d"),
         ],
-        [InlineKeyboardButton("❌ Cancel", callback_data="admin:competition")],
+        [
+            InlineKeyboardButton(get_text("admin_btn_custom_sched", lang), callback_data="admin:create_sched:custom"),
+        ],
+        [InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")],
     ])
 
 
