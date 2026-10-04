@@ -155,7 +155,7 @@ class ScoringAndRankingService:
         if not comp:
             raise CompetitionError("Competition not found")
 
-        if comp.status != CompetitionStatus.PUBLISHED:
+        if comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             raise ResultsNotPublishedError("Official results have not been published yet")
 
         stmt = select(ExamAttempt).where(
@@ -210,7 +210,7 @@ class ScoringAndRankingService:
         if not comp:
             raise CompetitionError("Competition not found")
 
-        if comp.status != CompetitionStatus.PUBLISHED:
+        if comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             raise ResultsNotPublishedError("Answer reviews are shielded until official results publication")
 
         stmt = select(ExamAttempt).where(
@@ -301,7 +301,7 @@ class ScoringAndRankingService:
         if not comp:
             raise CompetitionError("Competition not found")
 
-        if comp.status != CompetitionStatus.PUBLISHED:
+        if comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             raise ResultsNotPublishedError("Answer reviews are shielded until official results publication")
 
         stmt = select(ExamAttempt).where(

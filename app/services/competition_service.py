@@ -127,8 +127,9 @@ class CompetitionService:
             errors.append(f"question_count must be > 0, got {comp.question_count}")
 
         # 3. Status checks
-        if comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED]:
+        if comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             errors.append(f"Cannot activate competition that is already {comp.status}")
+
 
         # 4. Fetch questions from database
         q_stmt = (

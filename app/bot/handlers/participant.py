@@ -104,7 +104,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     .where(
                         and_(
                             ExamAttempt.participant_id == participant.id,
-                            Competition.status == CompetitionStatus.PUBLISHED,
+                            Competition.status.in_([CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]),
                         )
                     )
                     .order_by(ExamAttempt.created_at.desc())
@@ -216,9 +216,10 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if latest_row:
                 prev_attempt, prev_comp = latest_row
                 name = get_participant_display_name(update)
-                if prev_comp.status == CompetitionStatus.PUBLISHED:
+                if prev_comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
                     await render_participant_result_screen(query, prev_comp.id, participant.id, lang, name)
                     return
+
                 elif prev_attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]:
                     text = get_text("results_pending_notice", lang)
                     kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
@@ -275,9 +276,10 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
             # If already submitted / finished:
             name = get_participant_display_name(update)
-            if comp.status == CompetitionStatus.PUBLISHED:
+            if comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
                 await render_participant_result_screen(query, comp.id, participant.id, lang, name)
                 return
+
             else:
                 # Results pending
                 text = get_text("results_pending_notice", lang)
@@ -1028,11 +1030,25 @@ async def cb_review_answers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         review_lines.append(line)
 
     text = "\n".join(review_lines)
-    await query.edit_message_text(
-        text,
-        reply_markup=get_main_menu_keyboard(lang),
-        parse_mode=ParseMode.MARKDOWN,
-    )
+    if len(text) > 3800:
+        text = text[:3800] + "\n\n... (truncated)"
+
+    kb = get_main_menu_keyboard(lang)
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=kb,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as e:
+        logger.warning(f"Error in cb_review_answers with markdown: {e}")
+        plain = text.replace("*", "").replace("_", "").replace("`", "")
+        try:
+            await query.edit_message_text(plain, reply_markup=kb)
+        except Exception:
+            if query.message:
+                await query.message.reply_text(plain, reply_markup=kb)
+
 
 
 async def render_participant_result_screen(
@@ -1047,7 +1063,7 @@ async def render_participant_result_screen(
 
     async with AsyncSessionLocal() as db:
         comp = await db.get(Competition, competition_id)
-        if not comp or comp.status != CompetitionStatus.PUBLISHED:
+        if not comp or comp.status not in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
             text = get_text("results_pending_notice", lang)
             try:
                 if hasattr(target, "edit_message_text"):
