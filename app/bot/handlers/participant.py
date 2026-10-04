@@ -53,10 +53,13 @@ from app.bot.keyboards import (
 
 async def get_user_lang(user_id: int) -> str:
     """Helper to retrieve saved language for user or fallback to 'en'."""
-    async with AsyncSessionLocal() as db:
-        p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
-        if p and p.language_code:
-            return p.language_code
+    try:
+        async with AsyncSessionLocal() as db:
+            p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
+            if p and p.language_code:
+                return p.language_code
+    except Exception as e:
+        logger.warning(f"Error retrieving language for user {user_id}: {e}")
     return "en"
 
 
@@ -84,29 +87,36 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await cmd_admin(update, context)
         return
 
-    lang = await get_user_lang(user.id)
+    lang = "en"
+    try:
+        lang = await get_user_lang(user.id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch user language in cmd_start: {e}")
+
+    published_comp_id = None
+    try:
+        async with AsyncSessionLocal() as db:
+            participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+            if participant:
+                pub_res = await db.execute(
+                    select(ExamAttempt.competition_id)
+                    .join(Competition, ExamAttempt.competition_id == Competition.id)
+                    .where(
+                        and_(
+                            ExamAttempt.participant_id == participant.id,
+                            Competition.status == CompetitionStatus.PUBLISHED,
+                        )
+                    )
+                    .order_by(ExamAttempt.created_at.desc())
+                    .limit(1)
+                )
+                published_comp_id = pub_res.scalar_one_or_none()
+    except Exception as e:
+        logger.warning(f"Database error in cmd_start for user {user.id}: {e}")
+
     name = get_participant_display_name(update)
     text = get_text("welcome", lang, name=name)
     is_admin = settings.is_admin(user.id)
-
-    published_comp_id = None
-    async with AsyncSessionLocal() as db:
-        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
-        if participant:
-            pub_res = await db.execute(
-                select(ExamAttempt.competition_id)
-                .join(Competition, ExamAttempt.competition_id == Competition.id)
-                .where(
-                    and_(
-                        ExamAttempt.participant_id == participant.id,
-                        Competition.status == CompetitionStatus.PUBLISHED,
-                    )
-                )
-                .order_by(ExamAttempt.created_at.desc())
-                .limit(1)
-            )
-            published_comp_id = pub_res.scalar_one_or_none()
-
     keyboard = get_main_menu_keyboard(lang, is_admin=is_admin, published_comp_id=published_comp_id)
 
     try:
@@ -118,10 +128,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:
         logger.warning(f"Error sending welcome message with markdown: {e}")
         plain = text.replace("*", "").replace("_", "").replace("`", "")
-        if update.message:
-            await update.message.reply_text(plain, reply_markup=keyboard)
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(plain, reply_markup=keyboard)
+        try:
+            if update.message:
+                await update.message.reply_text(plain, reply_markup=keyboard)
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(plain, reply_markup=keyboard)
+        except Exception as e2:
+            logger.error(f"Critical error delivering fallback welcome message: {e2}")
+
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -61,8 +61,23 @@ settings = get_settings()
 
 
 async def error_handler(update: object, context) -> None:
-    """Logs unexpected Telegram bot errors."""
+    """Logs unexpected Telegram bot errors and safely attempts to notify the user."""
     logger.error(f"Telegram bot exception occurred: {context.error}", exc_info=context.error)
+    try:
+        from telegram import Update
+        if isinstance(update, Update):
+            if update.effective_chat and update.effective_message:
+                await update.effective_message.reply_text(
+                    "Assalamu Alaikum. A temporary connection issue occurred. Please send /start to continue."
+                )
+            elif update.callback_query:
+                await update.callback_query.answer(
+                    "A temporary issue occurred. Please tap /start or try again.",
+                    show_alert=True,
+                )
+    except Exception as e:
+        logger.warning(f"Failed to deliver fallback error notification to user: {e}")
+
 
 
 def build_application(token: Optional[str] = None) -> Application:

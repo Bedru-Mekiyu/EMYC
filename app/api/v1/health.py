@@ -62,6 +62,23 @@ async def bot_status_check(db: AsyncSession = Depends(get_db)):
     total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
     total_att = (await db.execute(select(func.count(ExamAttempt.id)))).scalar() or 0
 
+    webhook_info_dict = None
+    if settings.BOT_MODE == "webhook":
+        try:
+            from app.api.v1.telegram_webhook import get_telegram_application
+            t_app = get_telegram_application()
+            info = await t_app.bot.get_webhook_info()
+            webhook_info_dict = {
+                "url": info.url,
+                "has_custom_certificate": info.has_custom_certificate,
+                "pending_update_count": info.pending_update_count,
+                "last_error_date": info.last_error_date.isoformat() if info.last_error_date else None,
+                "last_error_message": info.last_error_message,
+                "ip_address": info.ip_address,
+            }
+        except Exception as e:
+            webhook_info_dict = {"error": str(e)}
+
     return {
         "bot_mode": settings.BOT_MODE,
         "environment": settings.ENVIRONMENT,
@@ -71,4 +88,6 @@ async def bot_status_check(db: AsyncSession = Depends(get_db)):
         "active_competition": comp_info,
         "total_registered_participants": total_p,
         "total_exam_attempts": total_att,
+        "telegram_webhook_info": webhook_info_dict,
     }
+
