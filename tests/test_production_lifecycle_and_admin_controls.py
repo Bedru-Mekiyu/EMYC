@@ -33,6 +33,8 @@ from app.bot.handlers.admin import (
     cb_admin_q_list,
     cb_admin_q_del,
     cb_admin_archive,
+    cb_admin_finalize,
+    cb_admin_publish,
 )
 from app.bot.handlers.participant import (
     cb_start_flow,
@@ -1932,6 +1934,135 @@ async def test_participant_cb_start_flow_published_and_pending_results(db_sessio
     result_text = query_pub.edit_message_text.call_args[0][0]
     assert "EMYC Competition Results" in result_text
     assert "Score:* 4 / 5 (80.0%)" in result_text
+    assert "Correct Answers:* 4" in result_text
+    assert "Incorrect / Unanswered:* 1" in result_text
+
+
+@pytest.mark.asyncio
+async def test_admin_finalize_and_publish_streamlined_progression(db_session: AsyncSession):
+    """Verifies that finalizing competition results immediately offers 1-tap Publish progression,
+    and publishing results provides direct results and competition navigation."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Progression Championship",
+        status=CompetitionStatus.CLOSED,
+        opens_at=now - timedelta(days=2),
+        closes_at=now - timedelta(days=1),
+        duration_minutes=30,
+        question_count=2,
+    )
+    part = Participant(
+        telegram_user_id=112233,
+        telegram_username="member_prog",
+        membership_id="EMYC/112233/2026",
+        language_code="en",
+    )
+    db_session.add_all([comp, part])
+    await db_session.flush()
+
+    att = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=part.id,
+        status=AttemptStatus.SUBMITTED,
+        started_at=now - timedelta(days=1, hours=2),
+        deadline_at=now - timedelta(days=1, hours=1),
+        score=2,
+    )
+    db_session.add(att)
+    await db_session.commit()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock()
+
+    # 1. Finalize results: cb_admin_finalize
+    query_fin = MagicMock()
+    query_fin.data = f"admin:finalize:{comp.id}"
+    query_fin.answer = AsyncMock()
+    query_fin.edit_message_text = AsyncMock()
+    update_fin = MagicMock(spec=Update)
+    update_fin.effective_user = admin_user
+    update_fin.callback_query = query_fin
+
+    await cb_admin_finalize(update_fin, context)
+    query_fin.edit_message_text.assert_called_once()
+    fin_text = query_fin.edit_message_text.call_args[0][0]
+    assert "Successfully Finalized Results" in fin_text
+    fin_kb = query_fin.edit_message_text.call_args[1]["reply_markup"]
+    fin_callbacks = [b.callback_data for row in fin_kb.inline_keyboard for b in row]
+    # Direct 1-tap progression to publish!
+    assert f"admin:publish:{comp.id}" in fin_callbacks
+    assert "admin:results" in fin_callbacks
+    assert "admin:competition" in fin_callbacks
+
+    # 2. Publish results: cb_admin_publish
+    query_pub = MagicMock()
+    query_pub.data = f"admin:publish:{comp.id}"
+    query_pub.answer = AsyncMock()
+    query_pub.edit_message_text = AsyncMock()
+    update_pub = MagicMock(spec=Update)
+    update_pub.effective_user = admin_user
+    update_pub.callback_query = query_pub
+
+    await cb_admin_publish(update_pub, context)
+    query_pub.edit_message_text.assert_called_once()
+    pub_text = query_pub.edit_message_text.call_args[0][0]
+    assert "Results Published Successfully" in pub_text
+    pub_kb = query_pub.edit_message_text.call_args[1]["reply_markup"]
+    pub_callbacks = [b.callback_data for row in pub_kb.inline_keyboard for b in row]
+    assert "admin:results" in pub_callbacks
+    assert "admin:competition" in pub_callbacks
+
+
+@pytest.mark.asyncio
+async def test_admin_competition_status_badges_and_clean_layout(db_session: AsyncSession):
+    """Verifies that cb_admin_competition displays human-friendly badges rather than raw internal enums."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Badges Cup",
+        status=CompetitionStatus.SCHEDULED,
+        opens_at=now + timedelta(hours=1),
+        closes_at=now + timedelta(hours=5),
+        duration_minutes=60,
+        question_count=10,
+    )
+    db_session.add(comp)
+    await db_session.commit()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    update.callback_query = query
+
+    # Check Scheduled
+    await cb_admin_competition(update, context)
+    text_sched = query.edit_message_text.call_args[0][0]
+    assert "⏰ Scheduled" in text_sched
+    assert "CompetitionStatus." not in text_sched
+
+    # Check Live
+    async with AsyncSessionLocal() as update_db:
+        c = await update_db.get(Competition, comp.id)
+        c.status = CompetitionStatus.LIVE
+        await update_db.commit()
+
+    query.edit_message_text.reset_mock()
+    await cb_admin_competition(update, context)
+    text_live = query.edit_message_text.call_args[0][0]
+    assert "🟢 Live" in text_live
+    assert "CompetitionStatus." not in text_live
+
 
 
 

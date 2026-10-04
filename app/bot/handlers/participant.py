@@ -1141,6 +1141,8 @@ async def render_participant_result_screen(
         total_participants = result_data.get("total_participants") or 1
         rank = result_data.get("rank") if result_data.get("rank") is not None else "-"
         time_taken = result_data.get("completion_time") or "00:00"
+        correct = score
+        incorrect = max(0, total_q - score)
 
         safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
         safe_name = user_display_name.replace("*", "").replace("_", " ").replace("`", "")
@@ -1153,6 +1155,8 @@ async def render_participant_result_screen(
             score=score,
             total=total_q,
             percent=percent,
+            correct=correct,
+            incorrect=incorrect,
             rank=rank,
             total_participants=total_participants,
             time=time_taken,

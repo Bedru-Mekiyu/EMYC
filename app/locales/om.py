@@ -70,6 +70,8 @@ MESSAGES = {
         "*{title}*\n\n"
         "👤 *Hirmaataa:* {full_name}\n"
         "🎯 *Qabxii:* {score} / {total} ({percent}%)\n"
+        "✅ *Deebii Sirrii:* {correct}\n"
+        "❌ *Deebii Dogoggoraa / Hin Deebifamne:* {incorrect}\n"
         "🏅 *Sadarkaa:* #{rank} keessaa {total_participants}\n"
         "⏱ *Yeroo Fudhate:* {time}"
     ),

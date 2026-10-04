@@ -70,6 +70,8 @@ MESSAGES = {
         "*{title}*\n\n"
         "👤 *ተወዳዳሪ:* {full_name}\n"
         "🎯 *ውጤት:* {score} / {total} ({percent}%)\n"
+        "✅ *ትክክለኛ መልሶች:* {correct}\n"
+        "❌ *የተሳሳቱ / ያልተመለሱ:* {incorrect}\n"
         "🏅 *ደረጃ:* #{rank} ከ {total_participants}\n"
         "⏱ *የፈጀው ሰዓት:* {time}"
     ),

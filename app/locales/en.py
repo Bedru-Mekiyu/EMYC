@@ -70,6 +70,8 @@ MESSAGES = {
         "*{title}*\n\n"
         "👤 *Participant:* {full_name}\n"
         "🎯 *Score:* {score} / {total} ({percent}%)\n"
+        "✅ *Correct Answers:* {correct}\n"
+        "❌ *Incorrect / Unanswered:* {incorrect}\n"
         "🏅 *Rank:* #{rank} of {total_participants}\n"
         "⏱ *Time Taken:* {time}"
     ),

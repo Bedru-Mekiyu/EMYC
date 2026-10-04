@@ -274,14 +274,28 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
 
         buttons.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
 
+        status_badges = {
+            CompetitionStatus.DRAFT: "📝 Draft",
+            CompetitionStatus.SCHEDULED: "⏰ Scheduled",
+            CompetitionStatus.LIVE: "🟢 Live",
+            CompetitionStatus.CLOSED: "🔴 Closed (Awaiting Finalization)",
+            CompetitionStatus.RESULTS_FINALIZED: "📊 Finalized (Ready to Publish)",
+            CompetitionStatus.PUBLISHED: "📢 Published",
+            CompetitionStatus.ARCHIVED: "📦 Archived",
+        }
+        status_label = status_badges.get(comp.status, str(comp.status.value if hasattr(comp.status, "value") else comp.status))
+        opens_str = comp.opens_at.strftime('%Y-%m-%d %H:%M UTC') if comp.opens_at else "TBA"
+        closes_str = comp.closes_at.strftime('%Y-%m-%d %H:%M UTC') if comp.closes_at else "TBA"
+        safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
+
         text = (
-            f"🏆 *Competition Management*\n\n"
-            f"*Competition:* {comp.title}\n"
-            f"*Current Status:* `{comp.status}`\n"
-            f"*Duration:* {comp.duration_minutes} minutes\n"
-            f"*Questions in Database:* {existing_q_count}\n"
-            f"*Opens:* {comp.opens_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
-            f"*Closes:* {comp.closes_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"🏆 *Competition Control*\n\n"
+            f"*{safe_title}*\n\n"
+            f"• *Status:* {status_label}\n"
+            f"• *Duration:* {comp.duration_minutes} minutes\n"
+            f"• *Questions:* {existing_q_count}\n"
+            f"• *Opens:* {opens_str}\n"
+            f"• *Closes:* {closes_str}\n"
         )
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
 
@@ -548,14 +562,22 @@ async def cb_admin_finalize(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             finalized = await ScoringAndRankingService.finalize_competition_results(
                 db, comp_id, admin_id=str(update.effective_user.id)
             )
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp_id}")],
+                [InlineKeyboardButton("📊 View Results", callback_data="admin:results")],
+                [InlineKeyboardButton("🏆 Competition Controls", callback_data="admin:competition")],
+            ])
             await query.edit_message_text(
-                f"✅ Successfully finalized results for {len(finalized)} attempts!\n\n"
-                f"You can now review or officially publish the results.",
-                reply_markup=get_admin_keyboard("en"),
+                f"✅ *Successfully Finalized Results!*\n\n"
+                f"• Processed Attempts: *{len(finalized)}*\n"
+                f"• Scores and rankings have been calculated.\n\n"
+                f"You can now publish results to participants or review rankings.",
+                reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN,
             )
         except CompetitionError as e:
-            await query.edit_message_text(f"❌ Finalization error: {str(e)}", reply_markup=get_admin_keyboard("en"))
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]])
+            await query.edit_message_text(f"❌ Finalization error: {str(e)}", reply_markup=kb)
 
 
 @require_admin
@@ -620,15 +642,22 @@ async def cb_admin_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             db.add(announcement)
             await db.commit()
 
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 View Results", callback_data="admin:results")],
+                [InlineKeyboardButton("🏆 Competition Controls", callback_data="admin:competition")],
+                [InlineKeyboardButton("◀️ Admin Menu", callback_data="admin:home")],
+            ])
             await query.edit_message_text(
                 f"📢 *Results Published Successfully!*\n\n"
-                f"Competition is now marked `PUBLISHED`.\n"
-                f"Notifications delivered to {sent_count} participants.",
-                reply_markup=get_admin_keyboard("en"),
+                f"• Status: `PUBLISHED` 🟢\n"
+                f"• Notifications delivered to *{sent_count}* participants.\n\n"
+                f"Participants can now view their scores, ranks, and review answers.",
+                reply_markup=kb,
                 parse_mode=ParseMode.MARKDOWN,
             )
         except CompetitionError as e:
-            await query.edit_message_text(f"❌ Publication error: {str(e)}", reply_markup=get_admin_keyboard("en"))
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]])
+            await query.edit_message_text(f"❌ Publication error: {str(e)}", reply_markup=kb)
 
 
 @require_admin
