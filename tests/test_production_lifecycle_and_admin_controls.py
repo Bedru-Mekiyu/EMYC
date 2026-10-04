@@ -835,11 +835,11 @@ async def test_admin_main_menu_simplified_layout(db_session: AsyncSession):
     callbacks = [b.callback_data for row in rendered_kb.inline_keyboard for b in row]
 
     assert len(buttons) == 3
-    assert "🌐 Change Language" in buttons
-    assert "🏆 Manage Competition" in buttons
-    assert "📊 Competition Results" in buttons
+    assert "🏆 Competition" in buttons
+    assert "📢 Announcement" in buttons
+    assert "🌐 Language" in buttons
 
-    assert callbacks == ["admin:lang", "admin:competition", "admin:results"]
+    assert callbacks == ["admin:competition", "admin:announce", "admin:lang"]
 
 
 @pytest.mark.asyncio
@@ -1101,9 +1101,9 @@ async def test_admin_multilingual_language_switching(db_session: AsyncSession):
     admin_kb = query_set.edit_message_text.call_args[1]["reply_markup"]
     admin_btn_texts = [b.text for row in admin_kb.inline_keyboard for b in row]
 
-    assert "🌐 ቋንቋ ቀይር" in admin_btn_texts
-    assert "🏆 ውድድር አስተዳድር" in admin_btn_texts
-    assert "📊 የውድድር ውጤቶች" in admin_btn_texts
+    assert "🏆 ውድድር" in admin_btn_texts
+    assert "📢 ማስታወቂያ" in admin_btn_texts
+    assert "🌐 ቋንቋ" in admin_btn_texts
 
 
 @pytest.mark.asyncio
@@ -1741,6 +1741,198 @@ async def test_render_participant_result_screen_graceful_fallbacks(db_session: A
     plain_text = plain_call[0][0]
     assert "Score: 0 / 10" in plain_text
     assert "Rank: #-" in plain_text
+
+
+@pytest.mark.asyncio
+async def test_participant_cb_start_flow_resumption_and_expiry(db_session: AsyncSession):
+    """Verifies that cb_start_flow resumes an in-progress attempt at the first unanswered question,
+    and auto-submits with time-up notice if the attempt deadline has expired."""
+    user_id = 717273
+    p_user = User(id=user_id, first_name="BilalResumer", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Resumption Challenge",
+        status=CompetitionStatus.LIVE,
+        opens_at=now - timedelta(minutes=10),
+        closes_at=now + timedelta(hours=2),
+        duration_minutes=30,
+        question_count=3,
+    )
+    part = Participant(
+        telegram_user_id=user_id,
+        telegram_username="bilal_r",
+        membership_id="EMYC/717273/2026",
+        language_code="en",
+    )
+    db_session.add_all([comp, part])
+    await db_session.flush()
+
+    q1 = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Q1 text",
+        options={"A": "1", "B": "2"},
+        correct_option="A",
+        order_index=1,
+    )
+    q2 = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Q2 text",
+        options={"A": "10", "B": "20"},
+        correct_option="B",
+        order_index=2,
+    )
+    q3 = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Q3 text",
+        options={"A": "100", "B": "200"},
+        correct_option="A",
+        order_index=3,
+    )
+    db_session.add_all([q1, q2, q3])
+    await db_session.flush()
+
+    attempt = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=part.id,
+        status=AttemptStatus.IN_PROGRESS,
+        started_at=now - timedelta(minutes=5),
+        deadline_at=now + timedelta(minutes=25),
+    )
+    db_session.add(attempt)
+    await db_session.flush()
+
+    # Add question orders
+    qo1 = AttemptQuestionOrder(attempt_id=attempt.id, question_id=q1.id, display_order=1, option_mapping={"A": "A", "B": "B"})
+    qo2 = AttemptQuestionOrder(attempt_id=attempt.id, question_id=q2.id, display_order=2, option_mapping={"A": "A", "B": "B"})
+    qo3 = AttemptQuestionOrder(attempt_id=attempt.id, question_id=q3.id, display_order=3, option_mapping={"A": "A", "B": "B"})
+    db_session.add_all([qo1, qo2, qo3])
+
+    # Participant has answered Q1 only
+    pa1 = ParticipantAnswer(
+        attempt_id=attempt.id,
+        question_id=q1.id,
+        selected_display_option="A",
+        resolved_canonical_option="A",
+        is_correct=True,
+    )
+    db_session.add(pa1)
+    await db_session.commit()
+
+    # 1. Test resumption: cb_start_flow should resume at Q2 (first unanswered question)
+    query = MagicMock()
+    query.data = "flow:start"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = p_user
+    update.callback_query = query
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    with patch("app.bot.handlers.participant.render_question_screen", new_callable=AsyncMock) as mock_render:
+        await cb_start_flow(update, context)
+        mock_render.assert_called_once_with(query, attempt.id, display_order=2, lang="en", participant_id=part.id)
+
+    # 2. Test deadline expiry: change deadline to past
+    async with AsyncSessionLocal() as update_db:
+        att_to_expire = await update_db.get(ExamAttempt, attempt.id)
+        att_to_expire.deadline_at = now - timedelta(minutes=1)
+        await update_db.commit()
+
+    query_exp = MagicMock()
+    query_exp.data = "flow:start"
+    query_exp.answer = AsyncMock()
+    query_exp.edit_message_text = AsyncMock()
+    update_exp = MagicMock(spec=Update)
+    update_exp.effective_user = p_user
+    update_exp.callback_query = query_exp
+
+    await cb_start_flow(update_exp, context)
+    query_exp.edit_message_text.assert_called_once()
+    expired_text = query_exp.edit_message_text.call_args[0][0]
+    assert "Time is up" in expired_text
+
+    # Verify attempt status was updated to SUBMITTED or EXPIRED
+    async with AsyncSessionLocal() as verify_db:
+        att_fresh = await verify_db.get(ExamAttempt, attempt.id)
+        assert att_fresh.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]
+
+
+@pytest.mark.asyncio
+async def test_participant_cb_start_flow_published_and_pending_results(db_session: AsyncSession):
+    """Verifies that cb_start_flow routes participant to their published results when available,
+    or displays a pending results notice when the exam is submitted but not yet published."""
+    user_id = 919293
+    p_user = User(id=user_id, first_name="AminaResults", is_bot=False)
+
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Amina Championship",
+        status=CompetitionStatus.RESULTS_FINALIZED,  # not yet published
+        opens_at=now - timedelta(days=2),
+        closes_at=now - timedelta(days=1),
+        duration_minutes=30,
+        question_count=5,
+    )
+    part = Participant(
+        telegram_user_id=user_id,
+        telegram_username="amina_r",
+        membership_id="EMYC/919293/2026",
+        language_code="en",
+    )
+    db_session.add_all([comp, part])
+    await db_session.flush()
+
+    attempt = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=part.id,
+        status=AttemptStatus.SUBMITTED,
+        started_at=now - timedelta(days=1, hours=2),
+        deadline_at=now - timedelta(days=1, hours=1),
+        score=4,
+        rank=1,
+    )
+    db_session.add(attempt)
+    await db_session.commit()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    # 1. When competition is not yet PUBLISHED -> results pending notice
+    query_pending = MagicMock()
+    query_pending.data = "flow:start"
+    query_pending.answer = AsyncMock()
+    query_pending.edit_message_text = AsyncMock()
+    update_pending = MagicMock(spec=Update)
+    update_pending.effective_user = p_user
+    update_pending.callback_query = query_pending
+
+    await cb_start_flow(update_pending, context)
+    query_pending.edit_message_text.assert_called_once()
+    pending_text = query_pending.edit_message_text.call_args[0][0]
+    assert "Results Pending" in pending_text or "submitted" in pending_text
+
+    # 2. When competition is PUBLISHED -> render_participant_result_screen is called
+    async with AsyncSessionLocal() as update_db:
+        comp_pub = await update_db.get(Competition, comp.id)
+        comp_pub.status = CompetitionStatus.PUBLISHED
+        await update_db.commit()
+
+    query_pub = MagicMock()
+    query_pub.data = "flow:start"
+    query_pub.answer = AsyncMock()
+    query_pub.edit_message_text = AsyncMock()
+    update_pub = MagicMock(spec=Update)
+    update_pub.effective_user = p_user
+    update_pub.callback_query = query_pub
+
+    await cb_start_flow(update_pub, context)
+    query_pub.edit_message_text.assert_called_once()
+    result_text = query_pub.edit_message_text.call_args[0][0]
+    assert "EMYC Competition Results" in result_text
+    assert "Score:* 4 / 5 (80.0%)" in result_text
+
 
 
 

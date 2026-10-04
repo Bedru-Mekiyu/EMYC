@@ -9,24 +9,15 @@ def get_main_menu_keyboard(
     is_admin: bool = False,
     published_comp_id: Optional[uuid.UUID] = None,
 ) -> InlineKeyboardMarkup:
-    """Participant main menu keyboard strictly providing:
-    1. ▶️ Start Competition
-    2. 🏆 My Result (if published competition attempt exists)
-    3. 🌐 Change Language
-    4. ❓ Help
-    5. ⚙️ Admin Dashboard (if user is admin)
+    """Participant main menu keyboard providing:
+    1. 🌐 Change Language
+    2. 🏆 Competition
+    3. ⚙️ Admin Dashboard (if user is admin)
     """
     rows = [
+        [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
         [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
     ]
-    if published_comp_id:
-        rows.append(
-            [InlineKeyboardButton(get_text("my_result_btn", lang), callback_data=f"rev:my_result:{published_comp_id}")]
-        )
-    rows.extend([
-        [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
-        [InlineKeyboardButton(get_text("help_btn", lang), callback_data="menu:help")],
-    ])
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")])
     return InlineKeyboardMarkup(rows)
@@ -226,15 +217,15 @@ def get_answer_review_nav_keyboard(
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Main administrative control panel keyboard with exactly 3 operational categories:
-    1. 🌐 Change Language
-    2. 🏆 Manage Competition
-    3. 📊 Competition Results
+    """Main administrative control panel keyboard with strictly 3 actions:
+    1. 🏆 Competition
+    2. 📢 Announcement
+    3. 🌐 Language
     """
     keyboard = [
-        [InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang")],
         [InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition")],
-        [InlineKeyboardButton(get_text("admin_btn_results", lang), callback_data="admin:results")],
+        [InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce")],
+        [InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -294,7 +285,7 @@ def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[s
 
     rows.append([
         InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:results"),
-        InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
+        InlineKeyboardButton("◀️ Competition", callback_data="admin:competition"),
     ])
     return InlineKeyboardMarkup(rows)
 

@@ -5,7 +5,7 @@ MESSAGES = {
         "ወደ የኢትዮጵያ ሙስሊም ወጣቶች ማህበር የፈተና መድረክ እንኳን በደህና መጡ።\n\n"
         "እውቀትዎን ይፈትሹ፣ ከእኩዮችዎ ጋር ይወዳደሩ እና ውጤትዎን ይከታተሉ።"
     ),
-    "start_btn": "▶️ ውድድሩን ጀምር",
+    "start_btn": "🏆 ውድድር",
     "change_lang_btn": "🌐 ቋንቋ ቀይር",
     "help_btn": "❓ እርዳታ",
     "select_language": "እባክዎ የሚፈልጉትን ቋንቋ ይምረጡ:",
@@ -98,10 +98,10 @@ MESSAGES = {
         "⏳ *በሂደት ላይ:* {in_progress_count}\n"
         "✅ *ያስገቡ:* {submitted_count}"
     ),
-    "admin_btn_competition": "🏆 ውድድር አስተዳድር",
+    "admin_btn_competition": "🏆 ውድድር",
     "admin_btn_status": "📊 ሁኔታ",
-    "admin_btn_results": "📊 የውድድር ውጤቶች",
-    "admin_btn_lang": "🌐 ቋንቋ ቀይር",
+    "admin_btn_results": "📊 ውጤቶች",
+    "admin_btn_lang": "🌐 ቋንቋ",
     "admin_btn_custom_dur": "⏱ የተለየ የጊዜ ርዝመት",
     "admin_custom_dur_prompt": (
         "⏱ *የተለየ የጊዜ ርዝመት*\n\n"

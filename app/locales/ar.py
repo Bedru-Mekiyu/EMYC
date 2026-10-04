@@ -5,7 +5,7 @@ MESSAGES = {
         "مرحباً بكم في منصة الامتحانات التنافسية التابعة للمجلس الإثيوبي للشباب المسلم (EMYC).\n\n"
         "اختبر معلوماتك، ونافس أقرانك، وتابع أداءك العلمي."
     ),
-    "start_btn": "▶️ بدء المسابقة",
+    "start_btn": "🏆 المسابقة",
     "change_lang_btn": "🌐 تغيير اللغة",
     "help_btn": "❓ مساعدة",
     "select_language": "يرجى اختيار لغتك المفضلة:",
@@ -98,10 +98,10 @@ MESSAGES = {
         "⏳ *قيد الاختبار:* {in_progress_count}\n"
         "✅ *المسلَّمة:* {submitted_count}"
     ),
-    "admin_btn_competition": "🏆 إدارة المسابقة",
+    "admin_btn_competition": "🏆 المسابقة",
     "admin_btn_status": "📊 الحالة",
-    "admin_btn_results": "📊 نتائج المسابقة",
-    "admin_btn_lang": "🌐 تغيير اللغة",
+    "admin_btn_results": "📊 النتائج",
+    "admin_btn_lang": "🌐 اللغة",
     "admin_btn_custom_dur": "⏱ مدة مخصصة",
     "admin_custom_dur_prompt": (
         "⏱ *مدة مخصصة*\n\n"

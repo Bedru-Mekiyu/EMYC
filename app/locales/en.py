@@ -5,7 +5,7 @@ MESSAGES = {
         "Welcome to the Ethiopian Muslim Youth Council Competitive Examination Platform.\n\n"
         "Test your knowledge, compete with peers, and track your performance."
     ),
-    "start_btn": "▶️ Start Competition",
+    "start_btn": "🏆 Competition",
     "change_lang_btn": "🌐 Change Language",
     "help_btn": "❓ Help",
     "select_language": "Please select your preferred language:",
@@ -98,10 +98,10 @@ MESSAGES = {
         "⏳ *In Progress:* {in_progress_count}\n"
         "✅ *Submitted:* {submitted_count}"
     ),
-    "admin_btn_competition": "🏆 Manage Competition",
+    "admin_btn_competition": "🏆 Competition",
     "admin_btn_status": "📊 Status",
-    "admin_btn_results": "📊 Competition Results",
-    "admin_btn_lang": "🌐 Change Language",
+    "admin_btn_results": "📊 Results",
+    "admin_btn_lang": "🌐 Language",
     "admin_btn_custom_dur": "⏱ Custom Duration",
     "admin_custom_dur_prompt": (
         "⏱ *Custom Competition Duration*\n\n"

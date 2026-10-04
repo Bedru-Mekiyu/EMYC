@@ -49,15 +49,13 @@ def test_multilingual_welcome_branding_and_greeting():
         assert expected_greeting in text
         assert expected_brand in text
 
-        # Verify main keyboard buttons: strictly 3 vertical buttons
+        # Verify main keyboard buttons: strictly 2 buttons: [Change Language], [Competition]
         kb = get_main_menu_keyboard(lang)
-        assert len(kb.inline_keyboard) == 3
-        # Row 1: Start Competition button
-        assert "▶️" in kb.inline_keyboard[0][0].text
-        # Row 2: Change Language
-        assert "🌐" in kb.inline_keyboard[1][0].text
-        # Row 3: Help
-        assert "❓" in kb.inline_keyboard[2][0].text
+        assert len(kb.inline_keyboard) == 2
+        # Row 1: Change Language
+        assert "🌐" in kb.inline_keyboard[0][0].text
+        # Row 2: Competition
+        assert "🏆" in kb.inline_keyboard[1][0].text
 
 
 def test_keyboard_layouts():
@@ -257,9 +255,9 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     start_kb = msg_start.reply_text.call_args[1]["reply_markup"]
     btn_texts = [b.text for row in start_kb.inline_keyboard for b in row]
     assert len(btn_texts) == 3
-    assert "🌐 Change Language" in btn_texts
-    assert "🏆 Manage Competition" in btn_texts
-    assert "📊 Competition Results" in btn_texts
+    assert "🏆 Competition" in btn_texts
+    assert "📢 Announcement" in btn_texts
+    assert "🌐 Language" in btn_texts
 
     # 2. Admin clicks Competition on empty DB -> shows Create Competition button (no sample/dev buttons)
     query_comp = MagicMock()

@@ -5,7 +5,7 @@ MESSAGES = {
         "Baga gara Waltajjii Qormaata Dorgommii Waldaa Dargaggoota Muslimoota Itoophiyaa dhuftan.\n\n"
         "Beekumsa keessan qoraa, dorgomaa, bu'aa keessanis hordofaa."
     ),
-    "start_btn": "▶️ Dorgommii Jalqabi",
+    "start_btn": "🏆 Dorgommii",
     "change_lang_btn": "🌐 Afaan Jijjiiri",
     "help_btn": "❓ Gargaarsa",
     "select_language": "Mee afaan filattan filadhaa:",
@@ -98,10 +98,10 @@ MESSAGES = {
         "⏳ *Adeemsarra:* {in_progress_count}\n"
         "✅ *Galchan:* {submitted_count}"
     ),
-    "admin_btn_competition": "🏆 Dorgommii Gulaali",
+    "admin_btn_competition": "🏆 Dorgommii",
     "admin_btn_status": "📊 Haala",
-    "admin_btn_results": "📊 Bu'aalee Dorgommii",
-    "admin_btn_lang": "🌐 Afaan Jijjiiri",
+    "admin_btn_results": "📊 Bu'aalee",
+    "admin_btn_lang": "🌐 Afaan",
     "admin_btn_custom_dur": "⏱ Yeroo Addaa",
     "admin_custom_dur_prompt": (
         "⏱ *Yeroo Addaa*\n\n"

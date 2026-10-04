@@ -232,7 +232,7 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 if get_settings().is_admin(user.id):
                     admin_hint = (
                         "⏳ *No competition is currently LIVE.*\n\n"
-                        "👑 As an administrator, you can configure questions and set a competition to `LIVE` via the Admin Dashboard."
+                        "👑 As an administrator, you can configure and open the competition via the Admin Dashboard."
                     )
                     kb = InlineKeyboardMarkup([
                         [InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")],
@@ -241,7 +241,15 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     await query.edit_message_text(admin_hint, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
                     return
 
-                text = get_text("competition_not_open", lang, opens_at="Soon", closes_at="TBA")
+                latest_comp = (await db.execute(select(Competition).order_by(Competition.created_at.desc()).limit(1))).scalar_one_or_none()
+                if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+                    opens_str = latest_comp.opens_at.strftime("%Y-%m-%d %H:%M UTC") if latest_comp.opens_at else "Soon"
+                    closes_str = latest_comp.closes_at.strftime("%Y-%m-%d %H:%M UTC") if latest_comp.closes_at else "TBA"
+                    text = get_text("competition_not_open", lang, opens_at=opens_str, closes_at=closes_str)
+                elif latest_comp and latest_comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+                    text = get_text("competition_closed", lang)
+                else:
+                    text = get_text("competition_not_open", lang, opens_at="Soon", closes_at="TBA")
                 await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang))
                 return
 
@@ -259,10 +267,15 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
             attempt = (await db.execute(stmt)).scalars().first()
 
-
             if attempt:
-                # If in progress, resume where they left off (first unanswered question)
+                # If in progress, check deadline and resume where they left off (first unanswered question)
                 if attempt.status == AttemptStatus.IN_PROGRESS:
+                    if now_utc() > ensure_utc(attempt.deadline_at):
+                        await CompetitionService.auto_submit_expired_attempt(db, attempt)
+                        text = get_text("time_up_auto_submit", lang)
+                        kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                        return
                     ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
                     ans_ids = set((await db.execute(ans_stmt)).scalars().all())
 
