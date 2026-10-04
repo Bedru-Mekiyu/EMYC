@@ -849,16 +849,18 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
     status_tag = format_competition_status(comp.status)
-    header = (
-        f"🏅 *EMYC Competition Leaderboard*\n\n"
-        f"*Competition:* {comp.title} ({status_tag})\n"
-        f"*Total Questions:* {comp.question_count}\n"
-        f"*Total Entries:* {total_attempts} | Page {page} of {total_pages}\n\n"
-    )
-
     if not attempts:
-        body = "_No participant attempts recorded yet for this competition._"
+        header = (
+            f"🏅 *EMYC Competition Leaderboard*\n\n"
+            f"*Competition:* {comp.title} ({status_tag})\n\n"
+        )
+        body = "_No participant attempts recorded yet._"
     else:
+        header = (
+            f"🏅 *EMYC Competition Leaderboard*\n\n"
+            f"*Competition:* {comp.title} ({status_tag})\n"
+            f"*Total Entries:* {total_attempts} | Page {page} of {total_pages}\n\n"
+        )
         rows = []
         for idx, att in enumerate(attempts, start=offset + 1):
             rank_display = f"#{att.rank}" if att.rank else f"#{idx}"
