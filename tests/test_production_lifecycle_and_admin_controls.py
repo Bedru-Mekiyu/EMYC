@@ -14,6 +14,7 @@ from app.models.participant import Participant
 from app.models.attempt import ExamAttempt, AttemptStatus
 from app.bot.handlers.admin import (
     cmd_admin,
+    cb_admin_status,
     cb_admin_lang,
     cb_admin_set_lang,
     cb_admin_competition,
@@ -2226,6 +2227,121 @@ async def test_admin_competition_status_badges_and_clean_layout(db_session: Asyn
     rankings_text = query.edit_message_text.call_args[0][0]
     assert "(🟢 Live)" in rankings_text
     assert "CompetitionStatus." not in rankings_text
+
+
+@pytest.mark.asyncio
+async def test_admin_account_excluded_from_registered_participants_and_rankings(db_session: AsyncSession):
+    """Verifies that an administrator's telegram account registered in the Participant table
+    is strictly excluded from participant counts, metrics, and leaderboards."""
+    admin_id = 998877
+    settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
+    admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
+
+    # 1. Seed two participants: one admin account and one real participant
+    admin_p = Participant(
+        telegram_user_id=admin_id,
+        telegram_username="admin_user",
+        membership_id="EMYC/998877/2026",
+        language_code="en",
+    )
+    real_p = Participant(
+        telegram_user_id=123456,
+        telegram_username="real_student",
+        membership_id="EMYC/123456/2026",
+        language_code="en",
+    )
+    db_session.add_all([admin_p, real_p])
+    await db_session.flush()
+
+    # Verify total DB count is 2, but ParticipantService.get_registered_participants_count is 1
+    total_db = (await db_session.execute(select(func.count(Participant.id)))).scalar()
+    assert total_db == 2
+    non_admin_count = await ParticipantService.get_registered_participants_count(db_session, exclude_admins=True)
+    assert non_admin_count == 1
+
+    # 2. Seed a competition with 1 attempt from admin and 1 attempt from real participant
+    now = datetime.now(timezone.utc)
+    comp = Competition(
+        title="Olympiad Counting Test",
+        status=CompetitionStatus.LIVE,
+        opens_at=now - timedelta(hours=1),
+        closes_at=now + timedelta(hours=24),
+        duration_minutes=30,
+        question_count=10,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    att_real = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=real_p.id,
+        status=AttemptStatus.SUBMITTED,
+        started_at=now - timedelta(minutes=20),
+        deadline_at=now + timedelta(minutes=10),
+        score=9,
+        completion_seconds=600,
+    )
+    att_admin = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=admin_p.id,
+        status=AttemptStatus.SUBMITTED,
+        started_at=now - timedelta(minutes=25),
+        deadline_at=now + timedelta(minutes=5),
+        score=10,
+        completion_seconds=500,
+    )
+    db_session.add_all([att_real, att_admin])
+    await db_session.commit()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}
+
+    # 3. Check /admin (cmd_admin) - Registered count must be 1, NOT 2
+    msg_mock = MagicMock()
+    msg_mock.reply_text = AsyncMock()
+    update_msg = MagicMock(spec=Update)
+    update_msg.effective_user = admin_user
+    update_msg.message = msg_mock
+    update_msg.callback_query = None
+
+    await cmd_admin(update_msg, context)
+    cmd_text = msg_mock.reply_text.call_args[0][0]
+    assert "Registered Participants:* 1" in cmd_text
+    assert "Started Attempts:* 1" in cmd_text
+
+    # 4. Check Results Dashboard (cb_admin_results) - Registered must be 1
+    query = MagicMock()
+    query.data = "admin:results"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update_cb = MagicMock(spec=Update)
+    update_cb.effective_user = admin_user
+    update_cb.callback_query = query
+
+    await cb_admin_results(update_cb, context)
+    res_text = query.edit_message_text.call_args[0][0]
+    assert "Registered:* 1" in res_text
+    assert "Completed:* 1" in res_text
+
+    # 5. Check Participant Analytics (cb_admin_participants) - Registered must be 1
+    query.edit_message_text.reset_mock()
+    query.data = "admin:participants"
+    await cb_admin_participants(update_cb, context)
+    part_text = query.edit_message_text.call_args[0][0]
+    assert "Total Registered Members: *1*" in part_text
+    assert "Attempts Started: *1*" in part_text
+
+    # 6. Finalize results and check Leaderboard (cb_admin_rankings)
+    await ScoringAndRankingService.finalize_competition_results(db_session, comp.id, admin_id=str(admin_id))
+    query.edit_message_text.reset_mock()
+    query.data = "admin:rankings"
+    await cb_admin_rankings(update_cb, context)
+    rankings_text = query.edit_message_text.call_args[0][0]
+    # Admin must NOT appear on the leaderboard; only real_student
+    assert "real_student" in rankings_text
+    assert "admin_user" not in rankings_text
+    assert "Top 1 Performers" in rankings_text
+
 
 
 

@@ -59,7 +59,8 @@ async def bot_status_check(db: AsyncSession = Depends(get_db)):
             "closes_at": comp.closes_at.isoformat() if comp.closes_at else None,
         }
 
-    total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
+    from app.services.membership_service import ParticipantService
+    total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
     total_att = (await db.execute(select(func.count(ExamAttempt.id)))).scalar() or 0
 
     webhook_info_dict = None

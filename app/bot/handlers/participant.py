@@ -360,9 +360,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data["pending_announcement"] = text
 
             async with AsyncSessionLocal() as db:
-                from app.models.participant import Participant
-                count_res = await db.execute(select(func.count(Participant.id)))
-                p_count = count_res.scalar() or 0
+                p_count = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
             preview_text = get_text(
                 "admin_confirm_broadcast",

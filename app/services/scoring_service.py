@@ -12,6 +12,8 @@ from app.models.attempt import (
     ParticipantAnswer,
 )
 from app.models.question import CompetitionQuestion
+from app.models.participant import Participant
+from app.core.config import get_settings
 from app.services.competition_service import CompetitionService, CompetitionError
 from app.core.logging import logger, log_audit_event
 
@@ -77,15 +79,36 @@ class ScoringAndRankingService:
         for act in active_res.scalars().all():
             await CompetitionService.auto_submit_expired_attempt(db, act)
 
-        # 2. Fetch all completed attempts (SUBMITTED or EXPIRED)
+        # 2. Fetch all completed attempts (SUBMITTED or EXPIRED), excluding administrators from competitive ranking
+        admin_ids = get_settings().admin_ids
+        admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
+
         attempts_stmt = select(ExamAttempt).where(
             and_(
                 ExamAttempt.competition_id == competition_id,
                 ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED, AttemptStatus.FINALIZED]),
             )
         )
+        if admin_p_sub is not None:
+            attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
         res = await db.execute(attempts_stmt)
         attempts = list(res.scalars().all())
+
+        # If admin test attempts exist, score them without assigning competitive ranks
+        if admin_p_sub is not None:
+            admin_att_stmt = select(ExamAttempt).where(
+                and_(
+                    ExamAttempt.competition_id == competition_id,
+                    ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED, AttemptStatus.FINALIZED]),
+                    ExamAttempt.participant_id.in_(admin_p_sub),
+                )
+            )
+            admin_atts = list((await db.execute(admin_att_stmt)).scalars().all())
+            for a_att in admin_atts:
+                await ScoringAndRankingService.score_attempt(db, a_att)
+                a_att.rank = None
+                a_att.status = AttemptStatus.FINALIZED
 
         # 3. Score all attempts
         for attempt in attempts:
@@ -179,13 +202,17 @@ class ScoringAndRankingService:
         minutes, secs = divmod(seconds, 60)
         formatted_time = f"{minutes:02d}:{secs:02d}"
 
-        # Total ranked participants in this competition
+        # Total ranked participants in this competition (excluding administrators)
         tot_stmt = select(func.count(ExamAttempt.id)).where(
             and_(
                 ExamAttempt.competition_id == competition_id,
                 ExamAttempt.status == AttemptStatus.FINALIZED,
             )
         )
+        admin_ids = get_settings().admin_ids
+        if admin_ids:
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+            tot_stmt = tot_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
         total_participants = (await db.execute(tot_stmt)).scalar() or 1
 
         return {

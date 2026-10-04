@@ -92,9 +92,8 @@ class NotificationService:
         competition_id: Optional[uuid.UUID] = None,
     ) -> int:
         """Broadcasts an administrative announcement to all registered participants."""
-        stmt = select(Participant.telegram_user_id)
-        res = await db.execute(stmt)
-        user_ids = list(res.scalars().all())
+        from app.services.membership_service import ParticipantService
+        user_ids = await ParticipantService.get_registered_participant_user_ids(db, exclude_admins=True)
 
         sent_count = 0
         for uid in user_ids:

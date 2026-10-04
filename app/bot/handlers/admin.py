@@ -105,15 +105,19 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         title = comp.title if comp else "None"
         status = format_competition_status(comp.status) if comp else "None"
 
-        # Total registered participants
-        total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
+        # Total registered participants (excluding administrators)
+        total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        # Attempt metrics for this competition
+        # Attempt metrics for this competition (excluding administrators)
         started = 0
         submitted = 0
         in_progress = 0
         if comp:
             attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
+            admin_ids = get_settings().admin_ids
+            if admin_ids:
+                admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+                attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
             attempts = list((await db.execute(attempts_stmt)).scalars().all())
             started = len(attempts)
             submitted = sum(1 for a in attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
@@ -191,11 +195,15 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.edit_message_text("No competitions found in system.", reply_markup=get_admin_keyboard("en"))
             return
 
-        # Total registered participants
-        total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
+        # Total registered participants (excluding administrators)
+        total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        # Attempt metrics for this competition
+        # Attempt metrics for this competition (excluding administrators)
         attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
+        admin_ids = get_settings().admin_ids
+        if admin_ids:
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+            attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
         attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
         started = len(attempts)
@@ -612,10 +620,13 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await query.edit_message_text("No competition found.", reply_markup=get_admin_keyboard(lang))
             return
 
-        # Registration metrics
-        total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
+        # Registration metrics (excluding administrators)
+        total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        # Database-level aggregate metrics for this competition (loads ZERO attempt ORM instances into Python memory)
+        # Database-level aggregate metrics for this competition (excluding administrators)
+        admin_ids = get_settings().admin_ids
+        admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
+
         agg_stmt = select(
             func.count(ExamAttempt.id).label("started"),
             func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("completed"),
@@ -623,6 +634,9 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             func.count(case((ExamAttempt.status == AttemptStatus.EXPIRED, 1))).label("expired"),
             func.max(ExamAttempt.score).label("highest_score"),
         ).where(ExamAttempt.competition_id == comp.id)
+
+        if admin_p_sub is not None:
+            agg_stmt = agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
 
         agg_res = (await db.execute(agg_stmt)).one()
         started = agg_res.started or 0
@@ -797,9 +811,8 @@ async def cb_admin_announce_confirm(update: Update, context: ContextTypes.DEFAUL
         return
 
     async with AsyncSessionLocal() as db:
-        # Retrieve all registered participants
-        participants_stmt = select(Participant.telegram_user_id)
-        user_ids = list((await db.execute(participants_stmt)).scalars().all())
+        # Retrieve all registered participants (excluding administrators)
+        user_ids = await ParticipantService.get_registered_participant_user_ids(db, exclude_admins=True)
 
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
         comp = (await db.execute(stmt)).scalar_one_or_none()
@@ -842,7 +855,7 @@ async def cb_admin_participants(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     async with AsyncSessionLocal() as db:
-        total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
+        total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
         comp = (await db.execute(stmt)).scalar_one_or_none()
@@ -858,6 +871,10 @@ async def cb_admin_participants(update: Update, context: ContextTypes.DEFAULT_TY
 
         if comp:
             attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
+            admin_ids = get_settings().admin_ids
+            if admin_ids:
+                admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+                attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
             attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
             started = len(attempts)
@@ -917,13 +934,17 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             select(ExamAttempt)
             .options(selectinload(ExamAttempt.participant))
             .where(ExamAttempt.competition_id == comp.id)
-            .order_by(
-                ExamAttempt.rank.asc().nulls_last(),
-                ExamAttempt.score.desc().nulls_last(),
-                ExamAttempt.completion_seconds.asc().nulls_last(),
-            )
-            .limit(5)
         )
+        admin_ids = get_settings().admin_ids
+        if admin_ids:
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+            attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+        attempts_stmt = attempts_stmt.order_by(
+            ExamAttempt.rank.asc().nulls_last(),
+            ExamAttempt.score.desc().nulls_last(),
+            ExamAttempt.completion_seconds.asc().nulls_last(),
+        ).limit(5)
         attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
     status_tag = format_competition_status(comp.status)

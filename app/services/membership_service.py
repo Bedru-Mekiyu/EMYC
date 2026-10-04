@@ -1,7 +1,7 @@
 import re
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
-from sqlalchemy import select, and_
+from typing import Optional, Dict, Any, List
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 import httpx
@@ -119,6 +119,28 @@ class ParticipantService:
         stmt = select(Participant).where(Participant.telegram_user_id == telegram_user_id)
         res = await db.execute(stmt)
         return res.scalar_one_or_none()
+
+    @staticmethod
+    async def get_registered_participants_count(db: AsyncSession, exclude_admins: bool = True) -> int:
+        """Returns total count of registered participants, excluding administrative accounts by default."""
+        stmt = select(func.count(Participant.id))
+        if exclude_admins:
+            admin_ids = settings.admin_ids
+            if admin_ids:
+                stmt = stmt.where(Participant.telegram_user_id.notin_(admin_ids))
+        res = await db.execute(stmt)
+        return res.scalar() or 0
+
+    @staticmethod
+    async def get_registered_participant_user_ids(db: AsyncSession, exclude_admins: bool = True) -> List[int]:
+        """Returns unique Telegram user IDs of all registered participants, excluding admins by default."""
+        stmt = select(Participant.telegram_user_id).distinct()
+        if exclude_admins:
+            admin_ids = settings.admin_ids
+            if admin_ids:
+                stmt = stmt.where(Participant.telegram_user_id.notin_(admin_ids))
+        res = await db.execute(stmt)
+        return list(res.scalars().all())
 
     @staticmethod
     async def update_language(
