@@ -69,8 +69,7 @@ MESSAGES = {
         "🎯 *Score:* {score} / {total} ({percent}%)\n"
         "✅ *Correct Answers:* {correct}\n"
         "❌ *Incorrect / Unanswered:* {incorrect}\n"
-        "🏅 *Rank:* #{rank} of {total_participants}\n"
-        "⏱ *Time Taken:* {time}"
+        "🏅 *Rank:* #{rank} of {total_participants}"
     ),
     "view_result_btn": "📊 View Result",
     "view_correct_btn": "✅ Correct Answers ({count})",

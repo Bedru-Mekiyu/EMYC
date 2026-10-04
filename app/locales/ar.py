@@ -69,8 +69,7 @@ MESSAGES = {
         "🎯 *الدرجة:* {score} / {total} ({percent}%)\n"
         "✅ *الإجابات الصحيحة:* {correct}\n"
         "❌ *الإجابات الخاطئة / غير المجاب عنها:* {incorrect}\n"
-        "🏅 *الترتيب:* #{rank} من {total_participants}\n"
-        "⏱ *الوقت المستغرق:* {time}"
+        "🏅 *الترتيب:* #{rank} من {total_participants}"
     ),
     "view_result_btn": "📊 عرض النتيجة",
     "view_correct_btn": "✅ الإجابات الصحيحة ({count})",

@@ -69,8 +69,7 @@ MESSAGES = {
         "🎯 *ውጤት:* {score} / {total} ({percent}%)\n"
         "✅ *ትክክለኛ መልሶች:* {correct}\n"
         "❌ *የተሳሳቱ / ያልተመለሱ:* {incorrect}\n"
-        "🏅 *ደረጃ:* #{rank} ከ {total_participants}\n"
-        "⏱ *የፈጀው ሰዓት:* {time}"
+        "🏅 *ደረጃ:* #{rank} ከ {total_participants}"
     ),
     "view_result_btn": "📊 ውጤት ይመልከቱ",
     "view_correct_btn": "✅ ትክክለኛ መልሶች ({count})",

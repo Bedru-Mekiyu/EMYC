@@ -462,8 +462,11 @@ async def test_participant_result_screen_clean_no_redundant_participant_name(db_
     assert "🎯 *Score:* 15 / 20 (75.0%)" in rendered_text
     assert "🏅 *Rank:* #1 of 1" in rendered_text
 
-    # Verify redundant 'Participant:' label is completely removed
+    # Verify redundant 'Participant:' and 'Time Taken:' labels are completely removed
     assert "Participant:" not in rendered_text
     assert "👤" not in rendered_text
+    assert "Time Taken:" not in rendered_text
+    assert "⏱" not in rendered_text
+
 
 

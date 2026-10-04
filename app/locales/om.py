@@ -69,8 +69,7 @@ MESSAGES = {
         "🎯 *Qabxii:* {score} / {total} ({percent}%)\n"
         "✅ *Deebii Sirrii:* {correct}\n"
         "❌ *Deebii Dogoggoraa / Hin Deebifamne:* {incorrect}\n"
-        "🏅 *Sadarkaa:* #{rank} keessaa {total_participants}\n"
-        "⏱ *Yeroo Fudhate:* {time}"
+        "🏅 *Sadarkaa:* #{rank} keessaa {total_participants}"
     ),
     "view_result_btn": "📊 Firii Ilaali",
     "view_correct_btn": "✅ Deebii Sirrii ({count})",
