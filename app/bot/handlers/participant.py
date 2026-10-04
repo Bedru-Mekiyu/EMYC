@@ -61,11 +61,12 @@ async def get_user_lang(user_id: int) -> str:
 
 
 def get_participant_display_name(update: Update) -> str:
-    """Extracts first name or username for greeting."""
+    """Extracts first name or username for greeting, sanitized for safe Markdown rendering."""
     user = update.effective_user
     if not user:
         return "Participant"
-    return user.first_name or user.username or "Participant"
+    raw_name = user.first_name or user.username or "Participant"
+    return raw_name.replace("_", " ").replace("*", "").replace("`", "").replace("[", "").replace("]", "")
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -108,11 +109,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     keyboard = get_main_menu_keyboard(lang, is_admin=is_admin, published_comp_id=published_comp_id)
 
-    if update.message:
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    elif update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    try:
+        if update.message:
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        elif update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.warning(f"Error sending welcome message with markdown: {e}")
+        plain = text.replace("*", "").replace("_", "").replace("`", "")
+        if update.message:
+            await update.message.reply_text(plain, reply_markup=keyboard)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(plain, reply_markup=keyboard)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -501,7 +510,10 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 return
 
     # Case D: Participant Membership ID input
-    if context.user_data.get("awaiting_membership"):
+    is_awaiting = context.user_data.get("awaiting_membership")
+    looks_like_id = text.upper().startswith("EMYC") or "/" in text
+
+    if is_awaiting or looks_like_id:
         async with AsyncSessionLocal() as db:
             try:
                 participant = await ParticipantService.register_or_bind_participant(
@@ -516,13 +528,17 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 success_msg = get_text(
                     "membership_verified",
                     lang,
-                    full_name=user.first_name or participant.telegram_username or participant.membership_id,
+                    full_name=get_participant_display_name(update),
                     membership_id=participant.membership_id,
                 )
-                await update.message.reply_text(
-                    success_msg,
-                    parse_mode=ParseMode.MARKDOWN,
-                )
+                try:
+                    await update.message.reply_text(
+                        success_msg,
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                except Exception as e:
+                    plain = success_msg.replace("*", "").replace("_", "").replace("`", "")
+                    await update.message.reply_text(plain)
 
                 # Check if there is an active competition to seamlessly guide the user
                 comp = await CompetitionService.get_active_competition(db)
@@ -536,37 +552,74 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                         opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
                         closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
                     )
-                    await update.message.reply_text(
-                        exam_info_text,
-                        reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
+                    try:
+                        await update.message.reply_text(
+                            exam_info_text,
+                            reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
+                            parse_mode=ParseMode.MARKDOWN,
+                        )
+                    except Exception as e:
+                        plain = exam_info_text.replace("*", "").replace("_", "").replace("`", "")
+                        await update.message.reply_text(
+                            plain,
+                            reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
+                        )
                 else:
-                    await update.message.reply_text(
-                        get_text("welcome", lang, name=get_participant_display_name(update)),
-                        reply_markup=get_main_menu_keyboard(lang),
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
+                    welcome_t = get_text("welcome", lang, name=get_participant_display_name(update))
+                    kb = get_main_menu_keyboard(lang)
+                    try:
+                        await update.message.reply_text(welcome_t, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                    except Exception:
+                        await update.message.reply_text(welcome_t.replace("*", "").replace("_", ""), reply_markup=kb)
+                return
             except InvalidMembershipFormatError:
-                await update.message.reply_text(
-                    get_text("membership_invalid_format", lang),
-                    reply_markup=get_membership_prompt_keyboard(lang),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
+                err = get_text("membership_invalid_format", lang)
+                kb = get_membership_prompt_keyboard(lang)
+                try:
+                    await update.message.reply_text(err, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                except Exception:
+                    await update.message.reply_text(err.replace("*", "").replace("_", ""), reply_markup=kb)
+                return
             except MembershipNotFoundError:
-                await update.message.reply_text(
-                    get_text("membership_not_found", lang),
-                    reply_markup=get_membership_prompt_keyboard(lang),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
+                err = get_text("membership_not_found", lang)
+                kb = get_membership_prompt_keyboard(lang)
+                try:
+                    await update.message.reply_text(err, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                except Exception:
+                    await update.message.reply_text(err.replace("*", "").replace("_", ""), reply_markup=kb)
+                return
             except MembershipAlreadyBoundError:
                 await update.message.reply_text(get_text("membership_already_bound", lang))
+                return
             except TelegramAccountAlreadyBoundError:
-                await update.message.reply_text(
-                    get_text("membership_account_already_bound", lang),
-                    reply_markup=get_main_menu_keyboard(lang),
-                    parse_mode=ParseMode.MARKDOWN,
-                )
+                err = get_text("membership_account_already_bound", lang)
+                kb = get_main_menu_keyboard(lang)
+                try:
+                    await update.message.reply_text(err, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                except Exception:
+                    await update.message.reply_text(err.replace("*", "").replace("_", ""), reply_markup=kb)
+                return
+
+    # Case E: General fallback for messages from participants
+    async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not p:
+            # Unregistered user sending general text -> guide them to start
+            context.user_data["awaiting_membership"] = True
+            prompt = get_text("membership_prompt", lang)
+            kb = get_membership_prompt_keyboard(lang)
+            try:
+                await update.message.reply_text(prompt, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                await update.message.reply_text(prompt.replace("*", "").replace("_", ""), reply_markup=kb)
+        else:
+            # Registered participant sending text -> show main menu
+            welcome_t = get_text("welcome", lang, name=get_participant_display_name(update))
+            kb = get_main_menu_keyboard(lang)
+            try:
+                await update.message.reply_text(welcome_t, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                await update.message.reply_text(welcome_t.replace("*", "").replace("_", ""), reply_markup=kb)
 
 
 async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

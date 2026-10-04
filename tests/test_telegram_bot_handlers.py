@@ -72,3 +72,46 @@ async def test_admin_authorization_guard():
     res = await guarded_handler(update_admin, context)
     mock_inner_handler.assert_called_once()
     assert res == "executed"
+
+
+@pytest.mark.asyncio
+async def test_participant_display_name_sanitization():
+    """Verifies that special Markdown characters in participant names are sanitized to prevent Telegram parse errors."""
+    from app.bot.handlers.participant import get_participant_display_name
+
+    update = MagicMock(spec=Update)
+    update.effective_user = User(id=12345, first_name="John_Doe*Bold`Code[Link]", is_bot=False)
+    name = get_participant_display_name(update)
+    assert "_" not in name
+    assert "*" not in name
+    assert "`" not in name
+    assert "[" not in name
+    assert "]" not in name
+    assert name == "John DoeBoldCodeLink"
+
+
+@pytest.mark.asyncio
+async def test_unregistered_freeform_text_fallback():
+    """Verifies that arbitrary text from an unregistered user triggers an EMYC registration guide instead of silent drop."""
+    from app.bot.handlers.participant import handle_text_message
+
+    update = MagicMock(spec=Update)
+    update.effective_user = User(id=88888, first_name="Curious_User", is_bot=False)
+    update.message = MagicMock(spec=Message)
+    update.message.text = "Hello, can I take the test?"
+    update.message.reply_text = AsyncMock()
+
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.user_data = {}  # Not awaiting membership
+
+    with patch("app.bot.handlers.participant.ParticipantService.get_participant_by_telegram_id", new_callable=AsyncMock) as mock_get_p:
+        mock_get_p.return_value = None
+
+        await handle_text_message(update, context)
+
+        update.message.reply_text.assert_called_once()
+        sent_text = update.message.reply_text.call_args[0][0]
+        assert "EMYC" in sent_text
+
+
+
