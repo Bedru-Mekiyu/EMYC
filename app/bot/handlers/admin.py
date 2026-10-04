@@ -55,6 +55,30 @@ def require_admin(handler_func):
     return wrapper
 
 
+STATUS_DISPLAY_MAP = {
+    CompetitionStatus.DRAFT: "📝 Draft",
+    CompetitionStatus.SCHEDULED: "⏰ Scheduled",
+    CompetitionStatus.LIVE: "🟢 Live",
+    CompetitionStatus.CLOSED: "🔴 Closed",
+    CompetitionStatus.RESULTS_FINALIZED: "📊 Finalized",
+    CompetitionStatus.PUBLISHED: "📢 Published",
+    CompetitionStatus.ARCHIVED: "📦 Archived",
+}
+
+
+def format_competition_status(status: Any) -> str:
+    """Returns a clean, human-readable status badge instead of raw internal enums."""
+    if status is None:
+        return "None"
+    if isinstance(status, str):
+        val = status.replace("CompetitionStatus.", "").strip()
+        for enum_val in CompetitionStatus:
+            if enum_val.value == val or enum_val.name == val:
+                return STATUS_DISPLAY_MAP.get(enum_val, val.capitalize())
+        return val.capitalize()
+    return STATUS_DISPLAY_MAP.get(status, str(getattr(status, "value", status)).capitalize())
+
+
 @require_admin
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles /admin command with EMYC Competition Admin summary and simplified 3-item controls."""
@@ -78,7 +102,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         comp = (await db.execute(stmt)).scalar_one_or_none()
 
         title = comp.title if comp else "None"
-        status = comp.status if comp else "N/A"
+        status = format_competition_status(comp.status) if comp else "None"
 
         # Total registered participants
         total_p = (await db.execute(select(func.count(Participant.id)))).scalar() or 0
@@ -182,7 +206,7 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     status_text = (
         f"📊 *EMYC Competition Operational Status*\n\n"
         f"*Title:* {comp.title}\n"
-        f"*Status:* `{comp.status}`\n"
+        f"*Status:* {format_competition_status(comp.status)}\n"
         f"*Opens:* {comp.opens_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
         f"*Closes:* {comp.closes_at.strftime('%Y-%m-%d %H:%M UTC')}\n\n"
         f"👥 *Participants:* {total_p}\n"
@@ -274,16 +298,7 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
 
         buttons.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
 
-        status_badges = {
-            CompetitionStatus.DRAFT: "📝 Draft",
-            CompetitionStatus.SCHEDULED: "⏰ Scheduled",
-            CompetitionStatus.LIVE: "🟢 Live",
-            CompetitionStatus.CLOSED: "🔴 Closed (Awaiting Finalization)",
-            CompetitionStatus.RESULTS_FINALIZED: "📊 Finalized (Ready to Publish)",
-            CompetitionStatus.PUBLISHED: "📢 Published",
-            CompetitionStatus.ARCHIVED: "📦 Archived",
-        }
-        status_label = status_badges.get(comp.status, str(comp.status.value if hasattr(comp.status, "value") else comp.status))
+        status_label = format_competition_status(comp.status)
         opens_str = comp.opens_at.strftime('%Y-%m-%d %H:%M UTC') if comp.opens_at else "TBA"
         closes_str = comp.closes_at.strftime('%Y-%m-%d %H:%M UTC') if comp.closes_at else "TBA"
         safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
@@ -540,7 +555,7 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         expired=expired,
         rate=completion_pct,
         top_score=top_score_val,
-        status=comp.status,
+        status=format_competition_status(comp.status),
     )
 
     await query.edit_message_text(
@@ -833,7 +848,7 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
-    status_tag = f"`{comp.status}`"
+    status_tag = format_competition_status(comp.status)
     header = (
         f"🏅 *EMYC Competition Leaderboard*\n\n"
         f"*Competition:* {comp.title} ({status_tag})\n"
@@ -1052,7 +1067,7 @@ async def cb_admin_create_questions(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text(
         f"🎉 *Competition Created Successfully!*\n\n"
         f"*Title:* {comp.title}\n"
-        f"*Status:* `DRAFT 📝`\n"
+        f"*Status:* {format_competition_status(comp.status)}\n"
         f"*Duration:* {comp.duration_minutes} minutes\n"
         f"*Questions Configured:* {comp.question_count}\n"
         f"*Opens:* {comp.opens_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
@@ -1145,7 +1160,7 @@ async def cb_admin_q_wiz_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if comp.status not in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
             await query.edit_message_text(
-                f"❌ Cannot add questions to competition with status `{comp.status}`.",
+                f"❌ Cannot add questions to competition with status {format_competition_status(comp.status)}.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
             )
             return

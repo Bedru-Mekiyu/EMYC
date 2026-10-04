@@ -121,7 +121,7 @@ MESSAGES = {
         "⌛ *Expired:* {expired}\n\n"
         "📈 *Completion Rate:* {rate}%\n"
         "🏅 *Top Score:* {top_score}\n\n"
-        "*Status:* `{status}`"
+        "*Status:* {status}"
     ),
     "admin_btn_announce": "📢 Announcement",
     "admin_confirm_broadcast": (

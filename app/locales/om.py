@@ -121,7 +121,7 @@ MESSAGES = {
         "⌛ *Yeroon Dhumate:* {expired}\n\n"
         "📈 *Reeshoo Xumuraa:* {rate}%\n"
         "🏅 *Qabxii Olaanaa:* {top_score}\n\n"
-        "*Haala:* `{status}`"
+        "*Haala:* {status}"
     ),
     "admin_btn_announce": "📢 Beeksisa",
     "admin_confirm_broadcast": (

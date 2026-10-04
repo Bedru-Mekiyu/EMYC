@@ -2063,6 +2063,34 @@ async def test_admin_competition_status_badges_and_clean_layout(db_session: Asyn
     assert "🟢 Live" in text_live
     assert "CompetitionStatus." not in text_live
 
+    # 3. Check /admin (cmd_admin)
+    msg_mock = MagicMock()
+    msg_mock.reply_text = AsyncMock()
+    update_msg = MagicMock(spec=Update)
+    update_msg.effective_user = admin_user
+    update_msg.message = msg_mock
+    update_msg.callback_query = None
+
+    await cmd_admin(update_msg, context)
+    msg_mock.reply_text.assert_called_once()
+    cmd_admin_text = msg_mock.reply_text.call_args[0][0]
+    assert "[🟢 Live]" in cmd_admin_text
+    assert "CompetitionStatus." not in cmd_admin_text
+
+    # 4. Check Results Dashboard (cb_admin_results)
+    query.edit_message_text.reset_mock()
+    await cb_admin_results(update, context)
+    res_text = query.edit_message_text.call_args[0][0]
+    assert "*Status:* 🟢 Live" in res_text
+    assert "CompetitionStatus." not in res_text
+
+    # 5. Check Leaderboard Header (cb_admin_rankings)
+    query.edit_message_text.reset_mock()
+    await cb_admin_rankings(update, context)
+    rankings_text = query.edit_message_text.call_args[0][0]
+    assert "(🟢 Live)" in rankings_text
+    assert "CompetitionStatus." not in rankings_text
+
 
 
 

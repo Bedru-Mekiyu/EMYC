@@ -121,7 +121,7 @@ MESSAGES = {
         "⌛ *ጊዜ ያለፈባቸው:* {expired}\n\n"
         "📈 *የማጠናቀቅ ምጣኔ:* {rate}%\n"
         "🏅 *ከፍተኛ ውጤት:* {top_score}\n\n"
-        "*ሁኔታ:* `{status}`"
+        "*ሁኔታ:* {status}"
     ),
     "admin_btn_announce": "📢 ማስታወቂያ",
     "admin_confirm_broadcast": (

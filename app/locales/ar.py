@@ -121,7 +121,7 @@ MESSAGES = {
         "⌛ *المنتهية صلاحيتها:* {expired}\n\n"
         "📈 *نسبة الإكمال:* {rate}%\n"
         "🏅 *أعلى درجة:* {top_score}\n\n"
-        "*الحالة:* `{status}`"
+        "*الحالة:* {status}"
     ),
     "admin_btn_announce": "📢 إعلان",
     "admin_confirm_broadcast": (
