@@ -140,10 +140,14 @@ class CompetitionService:
         q_res = await db.execute(q_stmt)
         questions = list(q_res.scalars().all())
 
-        if len(questions) != comp.question_count:
+        if not questions and comp.question_count > 0:
             errors.append(
                 f"Question count mismatch: configured {comp.question_count} questions, but found {len(questions)} in database"
             )
+        elif not questions and (comp.question_count or 0) <= 0:
+            errors.append("No questions found in database for this competition. Please insert questions into Supabase first.")
+        else:
+            comp.question_count = len(questions)
 
         seen_orders = set()
         required_keys = {"A", "B", "C", "D"}

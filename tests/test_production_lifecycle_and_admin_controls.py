@@ -973,7 +973,6 @@ async def test_admin_competition_state_aware_controls(db_session: AsyncSession):
     rendered_kb = query.edit_message_text.call_args[1]["reply_markup"]
     sched_btn_texts = [b.text for row in rendered_kb.inline_keyboard for b in row]
     assert "▶️ Start Competition (Set LIVE)" in sched_btn_texts
-    assert "📝 Add Question" in sched_btn_texts
     assert "📦 Archive Competition" in sched_btn_texts
     assert not any("Close Competition" in t for t in sched_btn_texts)
     assert not any("Setup Sample" in t for t in sched_btn_texts)

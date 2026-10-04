@@ -229,30 +229,27 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
             return
 
-        # State-aware buttons
+        # Count actual existing questions in database for this competition
+        cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp.id)
+        existing_q_count = (await db.execute(cnt_stmt)).scalar() or 0
+        if existing_q_count > 0 and comp.question_count != existing_q_count:
+            comp.question_count = existing_q_count
+            await db.commit()
+
+        # Simplified state-aware buttons (questions managed in Supabase, auto-attached when starting LIVE)
         if comp.status == CompetitionStatus.DRAFT:
-            if comp.question_count == 0:
+            if existing_q_count == 0 and comp.question_count == 0:
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
-                buttons.append([InlineKeyboardButton("📝 Add Question Manually", callback_data=f"admin:add_q:{comp.id}")])
             else:
-                buttons.append([InlineKeyboardButton("🟢 Open Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-                buttons.append([
-                    InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
-                    InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
-                ])
+                buttons.append([InlineKeyboardButton("🟢 Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
             buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
 
         elif comp.status == CompetitionStatus.SCHEDULED:
-            if comp.question_count == 0:
+            if existing_q_count == 0 and comp.question_count == 0:
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
-                buttons.append([InlineKeyboardButton("📝 Add Question Manually", callback_data=f"admin:add_q:{comp.id}")])
             else:
                 buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-                buttons.append([
-                    InlineKeyboardButton("📝 Add Question", callback_data=f"admin:add_q:{comp.id}"),
-                    InlineKeyboardButton(f"📋 Manage Questions ({comp.question_count})", callback_data=f"admin:q_list:{comp.id}:1"),
-                ])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.LIVE:
@@ -282,7 +279,7 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             f"*Competition:* {comp.title}\n"
             f"*Current Status:* `{comp.status}`\n"
             f"*Duration:* {comp.duration_minutes} minutes\n"
-            f"*Questions:* {comp.question_count}\n"
+            f"*Questions in Database:* {existing_q_count}\n"
             f"*Opens:* {comp.opens_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
             f"*Closes:* {comp.closes_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
         )
@@ -408,6 +405,36 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     async with AsyncSessionLocal() as db:
         p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
         lang = p.language_code if p and p.language_code else "en"
+
+        if new_status == CompetitionStatus.LIVE:
+            cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp_id)
+            existing_count = (await db.execute(cnt_stmt)).scalar() or 0
+
+            target_comp = await db.get(Competition, comp_id)
+            if not target_comp:
+                await query.edit_message_text("❌ Competition not found.", reply_markup=get_admin_keyboard("en"))
+                return
+
+            if existing_count == 0 and (target_comp.question_count or 0) == 0:
+                err_msg = (
+                    "⚠️ *Cannot start competition: No questions found in database.*\n\n"
+                    "Please insert your questions into Supabase (`competition_questions` table) first, then tap Start Competition."
+                )
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Refresh", callback_data="admin:competition")],
+                    [InlineKeyboardButton("◀️ Admin Menu", callback_data="admin:home")],
+                ])
+                await query.edit_message_text(err_msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            if existing_count > 0:
+                target_comp.question_count = existing_count
+            now = datetime.now(timezone.utc)
+            if target_comp.closes_at <= now:
+                target_comp.closes_at = now + timedelta(days=7)
+            if target_comp.opens_at > now:
+                target_comp.opens_at = now
+            await db.commit()
 
         try:
             comp = await CompetitionService.update_status(db, comp_id, new_status, admin_id=str(user_id))
