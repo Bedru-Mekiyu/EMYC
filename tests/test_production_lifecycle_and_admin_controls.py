@@ -710,15 +710,15 @@ async def test_question_list_and_deletion_reindexing(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_paginated_rankings(db_session: AsyncSession):
-    """Verifies that leaderboard rankings are properly paginated to avoid message limits."""
+async def test_top_5_leaderboard_screen(db_session: AsyncSession):
+    """Verifies that leaderboard rankings screen displays strictly Top 5 performers without pagination."""
     admin_id = 998877
     settings.ADMIN_TELEGRAM_IDS = f"{admin_id}"
     admin_user = User(id=admin_id, first_name="SuperAdmin", is_bot=False)
 
     now = datetime.now(timezone.utc)
     comp = Competition(
-        title="Pagination Cup",
+        title="Championship Cup",
         status=CompetitionStatus.RESULTS_FINALIZED,
         opens_at=now - timedelta(days=2),
         closes_at=now - timedelta(days=1),
@@ -754,39 +754,31 @@ async def test_paginated_rankings(db_session: AsyncSession):
 
     context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
 
-    # Page 1 (Top 10)
-    query_p1 = MagicMock()
-    query_p1.data = "admin:rankings:1"
-    query_p1.answer = AsyncMock()
-    query_p1.edit_message_text = AsyncMock()
-    update_p1 = MagicMock(spec=Update)
-    update_p1.effective_user = admin_user
-    update_p1.callback_query = query_p1
+    query = MagicMock()
+    query.data = "admin:rankings"
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = admin_user
+    update.callback_query = query
 
-    await cb_admin_rankings(update_p1, context)
-    text_p1 = query_p1.edit_message_text.call_args[0][0]
-    assert "15 | Page 1 of 2" in text_p1
-    assert "#1" in text_p1
-    assert "member_01" in text_p1
-    assert "#10" in text_p1
-    assert "member_11" not in text_p1
-
-    # Page 2 (Remaining 5)
-    query_p2 = MagicMock()
-    query_p2.data = "admin:rankings:2"
-    query_p2.answer = AsyncMock()
-    query_p2.edit_message_text = AsyncMock()
-    update_p2 = MagicMock(spec=Update)
-    update_p2.effective_user = admin_user
-    update_p2.callback_query = query_p2
-
-    await cb_admin_rankings(update_p2, context)
-    text_p2 = query_p2.edit_message_text.call_args[0][0]
-    assert "15 | Page 2 of 2" in text_p2
-    assert "#11" in text_p2
-    assert "member_11" in text_p2
-    assert "#15" in text_p2
-    assert "member_15" in text_p2
+    await cb_admin_rankings(update, context)
+    text = query.edit_message_text.call_args[0][0]
+    assert "Top 5 Performers" in text
+    assert "🥇 *#1*" in text
+    assert "member_01" in text
+    assert "🥈 *#2*" in text
+    assert "🥉 *#3*" in text
+    assert "4️⃣ *#4*" in text
+    assert "5️⃣ *#5*" in text
+    assert "member_05" in text
+    # Performers 6 through 15 should not appear in Top 5
+    assert "member_06" not in text
+    assert "member_11" not in text
+    assert "member_15" not in text
+    # Verify no pagination buttons or clutter
+    assert "Page 1 of" not in text
+    assert "Total Entries" not in text
 
 
 def test_render_production_guard(monkeypatch):

@@ -255,29 +255,20 @@ def get_admin_participants_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
 
 
 def get_admin_rankings_keyboard(lang: str = "en", page: int = 1, total_pages: int = 1) -> InlineKeyboardMarkup:
-    """Keyboard for rankings and leaderboard screen with pagination support."""
-    rows = []
-    if total_pages > 1:
-        nav_buttons = []
-        if page > 1:
-            nav_buttons.append(InlineKeyboardButton("◀️ Prev", callback_data=f"admin:rankings:{page - 1}"))
-        nav_buttons.append(InlineKeyboardButton(f"Page {page} / {total_pages}", callback_data=f"admin:rankings:{page}"))
-        if page < total_pages:
-            nav_buttons.append(InlineKeyboardButton("Next ▶️", callback_data=f"admin:rankings:{page + 1}"))
-        rows.append(nav_buttons)
-
-    rows.append([
-        InlineKeyboardButton("📊 Results Dashboard", callback_data="admin:results"),
-        InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
+    """Keyboard for rankings and leaderboard screen showing top performers."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📊 Results Dashboard", callback_data="admin:results"),
+            InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
+        ]
     ])
-    return InlineKeyboardMarkup(rows)
 
 
 def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[str] = None, lang: str = "en") -> InlineKeyboardMarkup:
     """Consolidated operational results dashboard keyboard."""
     rows = []
     if comp_id:
-        rows.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings:1")])
+        rows.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
         if status == "CLOSED":
             rows.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp_id}")])
         elif status == "RESULTS_FINALIZED":

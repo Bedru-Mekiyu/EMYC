@@ -808,13 +808,9 @@ async def cb_admin_participants(update: Update, context: ContextTypes.DEFAULT_TY
 
 @require_admin
 async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Dedicated leaderboard inspection screen with pagination support."""
+    """Dedicated leaderboard inspection screen displaying the Top 5 performers."""
     query = update.callback_query
     await query.answer()
-
-    parts = query.data.split(":")
-    page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
-    page_size = 10
 
     async with AsyncSessionLocal() as db:
         stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
@@ -827,13 +823,6 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        # Total attempts count for pagination
-        count_stmt = select(func.count(ExamAttempt.id)).where(ExamAttempt.competition_id == comp.id)
-        total_attempts = (await db.execute(count_stmt)).scalar() or 0
-        total_pages = max(1, (total_attempts + page_size - 1) // page_size)
-        page = max(1, min(page, total_pages))
-        offset = (page - 1) * page_size
-
         attempts_stmt = (
             select(ExamAttempt)
             .options(selectinload(ExamAttempt.participant))
@@ -843,8 +832,7 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 ExamAttempt.score.desc().nulls_last(),
                 ExamAttempt.completion_seconds.asc().nulls_last(),
             )
-            .offset(offset)
-            .limit(page_size)
+            .limit(5)
         )
         attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
@@ -856,14 +844,17 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         body = "_No participant attempts recorded yet._"
     else:
+        top_count = len(attempts)
         header = (
             f"🏅 *EMYC Competition Leaderboard*\n\n"
             f"*Competition:* {comp.title} ({status_tag})\n"
-            f"*Total Entries:* {total_attempts} | Page {page} of {total_pages}\n\n"
+            f"🏆 *Top {top_count} Performers:*\n\n"
         )
+        medals = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣"}
         rows = []
-        for idx, att in enumerate(attempts, start=offset + 1):
-            rank_display = f"#{att.rank}" if att.rank else f"#{idx}"
+        for idx, att in enumerate(attempts, start=1):
+            rank_num = att.rank if att.rank is not None else idx
+            medal = medals.get(rank_num, "🎖️")
             p_name = "Participant"
             if att.participant:
                 p_name = att.participant.telegram_username or att.participant.membership_id
@@ -871,13 +862,13 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             score_val = att.score if att.score is not None else "Pending"
             mins, secs = divmod(int(att.completion_seconds or 0), 60)
             time_display = f"{mins:02d}:{secs:02d}" if att.completion_seconds else "--:--"
-            rows.append(f"*{rank_display}* — `{p_name}` | *{score_val}/{comp.question_count}* pts ({time_display})")
+            rows.append(f"{medal} *#{rank_num}* — `{p_name}` | *{score_val}/{comp.question_count}* pts ({time_display})")
         body = "\n".join(rows)
 
     text = f"{header}{body}"
     await query.edit_message_text(
         text,
-        reply_markup=get_admin_rankings_keyboard("en", page=page, total_pages=total_pages),
+        reply_markup=get_admin_rankings_keyboard("en"),
         parse_mode=ParseMode.MARKDOWN,
     )
 
