@@ -405,3 +405,65 @@ async def test_participant_exam_info_screen_human_readable(db_session: AsyncSess
     assert "2026-10-04" not in rendered_text
     assert "UTC" not in rendered_text
 
+
+@pytest.mark.asyncio
+async def test_participant_result_screen_clean_no_redundant_participant_name(db_session: AsyncSession):
+    """Verifies that the participant personal result screen does not show redundant 'Participant: Name'."""
+    from app.bot.handlers.participant import render_participant_result_screen
+    from app.models.attempt import ExamAttempt, AttemptStatus
+
+    now = datetime(2026, 10, 4, 11, 0, tzinfo=timezone.utc)
+    comp = Competition(
+        title="Youth Olympiad",
+        status=CompetitionStatus.PUBLISHED,
+        opens_at=now - timedelta(days=2),
+        closes_at=now - timedelta(days=1),
+        duration_minutes=30,
+        question_count=20,
+    )
+    part = Participant(
+        telegram_user_id=778899,
+        membership_id="EMYC/778899/2026",
+        language_code="en",
+    )
+    db_session.add_all([comp, part])
+    await db_session.flush()
+
+    att = ExamAttempt(
+        competition_id=comp.id,
+        participant_id=part.id,
+        status=AttemptStatus.FINALIZED,
+        started_at=now - timedelta(hours=3),
+        deadline_at=now - timedelta(hours=2),
+        score=15,
+        rank=1,
+        completion_seconds=900,
+    )
+    db_session.add(att)
+    await db_session.commit()
+
+    mock_target = MagicMock()
+    mock_target.edit_message_text = AsyncMock()
+
+    await render_participant_result_screen(
+        target=mock_target,
+        competition_id=comp.id,
+        participant_id=part.id,
+        lang="en",
+        user_display_name="Bedru",
+    )
+
+    mock_target.edit_message_text.assert_called_once()
+    rendered_text = mock_target.edit_message_text.call_args[0][0]
+
+    # Verify score, rank, correct answers, time taken are present
+    assert "🏆 *EMYC Competition Results*" in rendered_text
+    assert "*Youth Olympiad*" in rendered_text
+    assert "🎯 *Score:* 15 / 20 (75.0%)" in rendered_text
+    assert "🏅 *Rank:* #1 of 1" in rendered_text
+
+    # Verify redundant 'Participant:' label is completely removed
+    assert "Participant:" not in rendered_text
+    assert "👤" not in rendered_text
+
+

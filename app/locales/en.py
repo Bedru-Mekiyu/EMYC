@@ -66,7 +66,6 @@ MESSAGES = {
     "results_title": (
         "🏆 *EMYC Competition Results*\n"
         "*{title}*\n\n"
-        "👤 *Participant:* {full_name}\n"
         "🎯 *Score:* {score} / {total} ({percent}%)\n"
         "✅ *Correct Answers:* {correct}\n"
         "❌ *Incorrect / Unanswered:* {incorrect}\n"
