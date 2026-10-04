@@ -19,6 +19,7 @@ from app.models.announcement import Announcement
 from app.services.competition_service import CompetitionService, CompetitionError
 from app.services.scoring_service import ScoringAndRankingService
 from app.services.membership_service import ParticipantService
+from app.core.time_utils import format_schedule_window, format_meta_line
 from app.bot.keyboards import (
     get_admin_keyboard,
     get_admin_language_keyboard,
@@ -299,18 +300,16 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
         buttons.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
 
         status_label = format_competition_status(comp.status)
-        opens_str = comp.opens_at.strftime('%Y-%m-%d %H:%M UTC') if comp.opens_at else "TBA"
-        closes_str = comp.closes_at.strftime('%Y-%m-%d %H:%M UTC') if comp.closes_at else "TBA"
+        sched_str = format_schedule_window(comp.opens_at, comp.closes_at)
+        meta_str = format_meta_line(comp.duration_minutes, existing_q_count)
         safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
 
         text = (
             f"🏆 *Competition Control*\n\n"
             f"*{safe_title}*\n\n"
             f"• *Status:* {status_label}\n"
-            f"• *Duration:* {comp.duration_minutes} minutes\n"
-            f"• *Questions:* {existing_q_count}\n"
-            f"• *Opens:* {opens_str}\n"
-            f"• *Closes:* {closes_str}\n"
+            f"• *Schedule:* {sched_str}\n"
+            f"• *Format:* {meta_str}\n"
         )
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
 

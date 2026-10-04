@@ -42,16 +42,14 @@ MESSAGES = {
         "🆔 *Eenyummeessaa:* `{membership_id}`\n\n"
         "Akkaawuntiin keessan milkaa'inaan hidhameera. Gara odeeffannoo dorgommiitti darbaa jira..."
     ),
-    "competition_not_open": "⏳ Dorgommiin ammatti hin banamne.\nSa'aatii banamu: {opens_at}\nSa'aatii cufamu: {closes_at}",
+    "competition_not_open": "⏳ *Dorgommiin ammatti hin banamne.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 Dorgommiin kun cufameera.",
     "start_exam_btn": "▶️ Dorgommii Jalqabi",
     "exam_info": (
         "🏆 *Dorgommii EMYC*\n"
         "*{title}*\n\n"
-        "📅 *Banamuu:* {opens_at}\n"
-        "📅 *Cufamuu:* {closes_at}\n"
-        "⏱ *Yeroo Kenname:* Daqiiqaa {duration}\n"
-        "📝 *Baay'ina Gaaffilee:* {questions} gaaffilee\n\n"
+        "{schedule}\n"
+        "{details}\n\n"
         "✅ *Dorgommii irratti hirmaachuuf ulaagaa guuttataniittu.*\n\n"
         "Yeroo qophooftan yaalii yeroo keessanii eegaluuf cuqaa."
     ),

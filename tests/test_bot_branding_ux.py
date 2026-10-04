@@ -306,3 +306,84 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     p_kb = query_to_p.edit_message_text.call_args[1]["reply_markup"]
     p_btn_texts = [b.text for row in p_kb.inline_keyboard for b in row]
     assert "⚙️ Admin Dashboard" in p_btn_texts
+
+
+def test_human_readable_schedule_and_duration_formatters():
+    """Verifies that format_schedule_window and format_meta_line output human-friendly strings."""
+    from app.core.time_utils import (
+        format_schedule_window,
+        format_meta_line,
+        format_friendly_duration,
+        format_friendly_questions,
+    )
+
+    # 1. Test duration formatting
+    assert format_friendly_duration(120) == "2 hours"
+    assert format_friendly_duration(60) == "1 hour"
+    assert format_friendly_duration(30) == "30 minutes"
+    assert format_friendly_duration(90) == "1 hr 30 mins"
+    assert format_friendly_duration(0) == "Untimed"
+
+    # 2. Test question count
+    assert format_friendly_questions(20) == "20 questions"
+    assert format_friendly_questions(1) == "1 question"
+
+    # 3. Test meta line: duration · questions
+    assert format_meta_line(120, 20) == "2 hours · 20 questions"
+    assert format_meta_line(30, 5) == "30 minutes · 5 questions"
+
+    # 4. Test schedule window
+    now = datetime(2026, 10, 4, 11, 0, tzinfo=timezone.utc)  # 2:00 PM EAT (UTC+3)
+    tomorrow = now + timedelta(days=1)
+    window_multiday = format_schedule_window(now, tomorrow, now=now)
+    assert window_multiday == "Today, 2:00 PM → Tomorrow, 2:00 PM"
+
+    same_day_end = now + timedelta(hours=2)
+    window_sameday = format_schedule_window(now, same_day_end, now=now)
+    assert window_sameday == "Today, 2:00 PM → 4:00 PM"
+
+
+@pytest.mark.asyncio
+async def test_participant_exam_info_screen_human_readable(db_session: AsyncSession):
+    """Verifies that the participant exam info screen renders clean human-readable schedule and format."""
+    now = datetime(2026, 10, 4, 11, 0, tzinfo=timezone.utc)
+    comp = Competition(
+        title="Ramadan Cup 2026",
+        status=CompetitionStatus.LIVE,
+        opens_at=now,
+        closes_at=now + timedelta(days=1),
+        duration_minutes=120,
+        question_count=20,
+    )
+    db_session.add(comp)
+    await db_session.flush()
+
+    p = Participant(
+        telegram_user_id=888777,
+        telegram_username="bilal_tester",
+        membership_id="EMYC/888777/2026",
+        language_code="en",
+    )
+    db_session.add(p)
+    await db_session.commit()
+
+    user = User(id=888777, first_name="Bilal", is_bot=False)
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.edit_message_text = AsyncMock()
+    update = MagicMock(spec=Update)
+    update.effective_user = user
+    update.callback_query = query
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+
+    await cb_start_flow(update, context)
+
+    query.edit_message_text.assert_called_once()
+    rendered_text = query.edit_message_text.call_args[0][0]
+    assert "🏆 *EMYC Competition*" in rendered_text
+    assert "*Ramadan Cup 2026*" in rendered_text
+    assert "2 hours · 20 questions" in rendered_text
+    assert "→" in rendered_text
+    assert "2026-10-04" not in rendered_text
+    assert "UTC" not in rendered_text
+

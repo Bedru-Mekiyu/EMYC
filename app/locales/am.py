@@ -42,16 +42,14 @@ MESSAGES = {
         "🆔 *መታወቂያ:* `{membership_id}`\n\n"
         "መለያዎ በተሳካ ሁኔታ ተገናኝቷል። ወደ ውድድሩ ዝርዝር በመሸጋገር ላይ..."
     ),
-    "competition_not_open": "⏳ ውድድሩ ገና አልተከፈተም።\nየሚከፈትበት ሰዓት: {opens_at}\nየሚዘጋበት ሰዓት: {closes_at}",
+    "competition_not_open": "⏳ *ውድድሩ ገና አልተከፈተም።*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 ይህ ውድድር ተዘግቷል።",
     "start_exam_btn": "▶️ ውድድሩን ጀምር",
     "exam_info": (
         "🏆 *የኢ.ሙ.ወ.ም ውድድር*\n"
         "*{title}*\n\n"
-        "📅 *የሚከፈትበት:* {opens_at}\n"
-        "📅 *የሚዘጋበት:* {closes_at}\n"
-        "⏱ *የፈተናው ሰዓት:* {duration} ደቂቃ\n"
-        "📝 *የጥያቄዎች ብዛት:* {questions} ጥያቄዎች\n\n"
+        "{schedule}\n"
+        "{details}\n\n"
         "✅ *በውድድሩ ለመሳተፍ ብቁ ኖት።*\n\n"
         "ዝግጁ ሲሆኑ የጊዜ ቆጣሪውን ለማስጀመር ከታች ያለውን ቁልፍ ይጫኑ።"
     ),

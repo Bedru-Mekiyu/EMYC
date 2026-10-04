@@ -42,16 +42,14 @@ MESSAGES = {
         "🆔 *ID:* `{membership_id}`\n\n"
         "Your account is linked successfully. Proceeding to competition details..."
     ),
-    "competition_not_open": "⏳ The competition is not open yet.\nOpens: {opens_at}\nCloses: {closes_at}",
+    "competition_not_open": "⏳ *The competition is not open yet.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 This competition has closed.",
     "start_exam_btn": "▶️ Start Competition",
     "exam_info": (
         "🏆 *EMYC Competition*\n"
         "*{title}*\n\n"
-        "📅 *Opens:* {opens_at}\n"
-        "📅 *Closes:* {closes_at}\n"
-        "⏱ *Duration:* {duration} minutes\n"
-        "📝 *Questions:* {questions} questions\n\n"
+        "{schedule}\n"
+        "{details}\n\n"
         "✅ *You are eligible to participate.*\n\n"
         "Press the button below when you are ready to begin your timed attempt."
     ),

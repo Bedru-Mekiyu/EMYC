@@ -42,16 +42,14 @@ MESSAGES = {
         "🆔 *رقم العضوية:* `{membership_id}`\n\n"
         "تم ربط حسابك بنجاح. جارٍ الانتقال إلى تفاصيل المسابقة..."
     ),
-    "competition_not_open": "⏳ المسابقة ليست مفتوحة حالياً.\nتفتح في: {opens_at}\nتغلق في: {closes_at}",
+    "competition_not_open": "⏳ *المسابقة ليست مفتوحة حالياً.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 هذه المسابقة مغلقة الآن.",
     "start_exam_btn": "▶️ بدء المسابقة",
     "exam_info": (
         "🏆 *مسابقة EMYC*\n"
         "*{title}*\n\n"
-        "📅 *تفتح في:* {opens_at}\n"
-        "📅 *تغلق في:* {closes_at}\n"
-        "⏱ *المدة:* {duration} دقيقة\n"
-        "📝 *الأسئلة:* {questions} سؤال\n\n"
+        "{schedule}\n"
+        "{details}\n\n"
         "✅ *أنت مؤهل للمشاركة في المسابقة.*\n\n"
         "اضغط على الزر أدناه عندما تكون مستعداً لبدء وقتك المحدد."
     ),

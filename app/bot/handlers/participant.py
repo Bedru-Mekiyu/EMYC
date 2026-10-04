@@ -35,7 +35,12 @@ from app.services.scoring_service import (
     ScoringAndRankingService,
     ResultsNotPublishedError,
 )
-from app.core.time_utils import now_utc, ensure_utc
+from app.core.time_utils import (
+    now_utc,
+    ensure_utc,
+    format_schedule_window,
+    format_meta_line,
+)
 from app.bot.keyboards import (
     get_main_menu_keyboard,
     get_membership_prompt_keyboard,
@@ -243,14 +248,14 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
                 latest_comp = (await db.execute(select(Competition).order_by(Competition.created_at.desc()).limit(1))).scalar_one_or_none()
                 if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
-                    opens_str = latest_comp.opens_at.strftime("%Y-%m-%d %H:%M UTC") if latest_comp.opens_at else "Soon"
-                    closes_str = latest_comp.closes_at.strftime("%Y-%m-%d %H:%M UTC") if latest_comp.closes_at else "TBA"
-                    text = get_text("competition_not_open", lang, opens_at=opens_str, closes_at=closes_str)
+                    sched = format_schedule_window(latest_comp.opens_at, latest_comp.closes_at)
+                    meta = format_meta_line(latest_comp.duration_minutes, latest_comp.question_count)
+                    text = get_text("competition_not_open", lang, schedule=sched, details=meta, opens_at=sched, closes_at=meta)
                 elif latest_comp and latest_comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
                     text = get_text("competition_closed", lang)
                 else:
-                    text = get_text("competition_not_open", lang, opens_at="Soon", closes_at="TBA")
-                await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang))
+                    text = get_text("competition_not_open", lang, schedule="Schedule TBA", details="", opens_at="Soon", closes_at="TBA")
+                await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang), parse_mode=ParseMode.MARKDOWN)
                 return
 
             # 3. Check existing attempt for this competition
@@ -308,14 +313,18 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     return
 
             # 4. No attempt yet -> Show competition summary and Start Competition button
+            sched_str = format_schedule_window(comp.opens_at, comp.closes_at)
+            meta_str = format_meta_line(comp.duration_minutes, comp.question_count)
             exam_info_text = get_text(
                 "exam_info",
                 lang,
                 title=comp.title,
+                schedule=sched_str,
+                details=meta_str,
                 questions=comp.question_count,
                 duration=comp.duration_minutes,
-                opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
-                closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
+                opens_at=sched_str,
+                closes_at=meta_str,
             )
             await query.edit_message_text(
                 exam_info_text,
@@ -588,14 +597,18 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 # Check if there is an active competition to seamlessly guide the user
                 comp = await CompetitionService.get_active_competition(db)
                 if comp:
+                    sched_str = format_schedule_window(comp.opens_at, comp.closes_at)
+                    meta_str = format_meta_line(comp.duration_minutes, comp.question_count)
                     exam_info_text = get_text(
                         "exam_info",
                         lang,
                         title=comp.title,
+                        schedule=sched_str,
+                        details=meta_str,
                         questions=comp.question_count,
                         duration=comp.duration_minutes,
-                        opens_at=comp.opens_at.strftime("%Y-%m-%d %H:%M UTC"),
-                        closes_at=comp.closes_at.strftime("%Y-%m-%d %H:%M UTC"),
+                        opens_at=sched_str,
+                        closes_at=meta_str,
                     )
                     try:
                         await update.message.reply_text(
