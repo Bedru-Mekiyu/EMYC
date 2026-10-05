@@ -201,4 +201,6 @@ MESSAGES = {
         "Dorgommiin yeroo saganteeffametti ofumaan banaama."
     ),
     "error_generic_retry": "⚠️ Gaaffii keessan raawwachuu keessatti hanqinni yeroo muraasaa uumameera. Mee irra deebi'aa yaalaa.",
+    "admin_btn_export_csv": "📥 Bu'aa CSVn Buufadhaa",
+    "admin_export_generating": "Bu'aa CSV qopheessaa jira...",
 }

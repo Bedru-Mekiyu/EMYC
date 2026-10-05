@@ -263,14 +263,16 @@ def get_admin_participants_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     ])
 
 
-def get_admin_rankings_keyboard(lang: str = "en", page: int = 1, total_pages: int = 1) -> InlineKeyboardMarkup:
+def get_admin_rankings_keyboard(lang: str = "en", page: int = 1, total_pages: int = 1, comp_id: Optional[Any] = None) -> InlineKeyboardMarkup:
     """Keyboard for rankings and leaderboard screen showing top performers."""
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📊 Results Dashboard", callback_data="admin:results"),
-            InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
-        ]
+    rows = []
+    if comp_id:
+        rows.append([InlineKeyboardButton(get_text("admin_btn_export_csv", lang), callback_data=f"admin:export_results:{comp_id}")])
+    rows.append([
+        InlineKeyboardButton("📊 Results Dashboard", callback_data="admin:results"),
+        InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home"),
     ])
+    return InlineKeyboardMarkup(rows)
 
 
 def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[str] = None, lang: str = "en") -> InlineKeyboardMarkup:
@@ -278,6 +280,8 @@ def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[s
     rows = []
     if comp_id:
         rows.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
+        if status in ["CLOSED", "RESULTS_FINALIZED", "PUBLISHED", "ARCHIVED"]:
+            rows.append([InlineKeyboardButton(get_text("admin_btn_export_csv", lang), callback_data=f"admin:export_results:{comp_id}")])
         if status == "CLOSED":
             rows.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp_id}")])
         elif status == "RESULTS_FINALIZED":

@@ -326,17 +326,20 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
 
         elif comp.status == CompetitionStatus.CLOSED:
             buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])
+            buttons.append([InlineKeyboardButton(get_text("admin_btn_export_csv", lang), callback_data=f"admin:export_results:{comp.id}")])
             buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.RESULTS_FINALIZED:
             buttons.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp.id}")])
+            buttons.append([InlineKeyboardButton(get_text("admin_btn_export_csv", lang), callback_data=f"admin:export_results:{comp.id}")])
             buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+            buttons.append([InlineKeyboardButton(get_text("admin_btn_export_csv", lang), callback_data=f"admin:export_results:{comp.id}")])
             buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
@@ -849,6 +852,66 @@ async def cb_admin_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 @require_admin
+async def cb_admin_export_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Generates and delivers official competition results as a downloadable CSV document."""
+    query = update.callback_query
+    await query.answer("Generating CSV export...", show_alert=False)
+    comp_id = uuid.UUID(query.data.split(":")[2])
+
+    import io
+
+    async with AsyncSessionLocal() as db:
+        try:
+            csv_content, filename = await ScoringAndRankingService.generate_results_csv(db, comp_id)
+            comp = await db.get(Competition, comp_id)
+            title = comp.title if comp else "Competition"
+        except Exception as e:
+            logger.error(f"Error generating results CSV for competition {comp_id}: {e}", exc_info=True)
+            if query.message:
+                await query.message.reply_text("⚠️ A temporary error occurred while generating the results CSV.")
+            return
+
+    # UTF-8 BOM encoding for seamless Microsoft Excel compatibility
+    csv_bytes = io.BytesIO(csv_content.encode("utf-8-sig"))
+    csv_bytes.name = filename
+
+    username = update.effective_user.username or update.effective_user.first_name or "Admin"
+    caption = (
+        f"📊 *Official Results Export*\n\n"
+        f"• *Competition:* {title}\n"
+        f"• *Exported by:* @{username}\n"
+        f"• *Format:* CSV (UTF-8 with BOM for Excel)"
+    )
+
+    try:
+        if query.message:
+            await query.message.reply_document(
+                document=csv_bytes,
+                filename=filename,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        else:
+            await context.bot.send_document(
+                chat_id=update.effective_user.id,
+                document=csv_bytes,
+                filename=filename,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+    except Exception as e:
+        logger.error(f"Failed to send results CSV document: {e}", exc_info=True)
+        csv_bytes.seek(0)
+        target_chat = query.message.chat_id if query.message else update.effective_user.id
+        await context.bot.send_document(
+            chat_id=target_chat,
+            document=csv_bytes,
+            filename=filename,
+            caption=f"Official Results Export: {title}",
+        )
+
+
+@require_admin
 async def cb_admin_announce(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Administrative announcement prompt."""
     query = update.callback_query
@@ -1048,7 +1111,7 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     text = f"{header}{body}"
     await query.edit_message_text(
         text,
-        reply_markup=get_admin_rankings_keyboard("en"),
+        reply_markup=get_admin_rankings_keyboard("en", comp_id=comp.id),
         parse_mode=ParseMode.MARKDOWN,
     )
 

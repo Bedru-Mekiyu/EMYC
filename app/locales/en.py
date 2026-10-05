@@ -202,4 +202,6 @@ MESSAGES = {
         "The competition will open automatically at the scheduled time."
     ),
     "error_generic_retry": "⚠️ A temporary issue occurred while processing your request. Please try again from the menu.",
+    "admin_btn_export_csv": "📥 Export Results CSV",
+    "admin_export_generating": "Generating official results CSV...",
 }

@@ -407,3 +407,89 @@ class ScoringAndRankingService:
             })
 
         return review_items
+
+    @staticmethod
+    async def generate_results_csv(
+        db: AsyncSession, competition_id: uuid.UUID
+    ) -> Tuple[str, str]:
+        """Generates standard CSV content with UTF-8 BOM encoding for official competition results.
+        Returns: (csv_string, filename)
+        """
+        import csv
+        import io
+
+        comp = await db.get(Competition, competition_id)
+        if not comp:
+            raise CompetitionError("Competition not found")
+
+        stmt = (
+            select(ExamAttempt)
+            .options(selectinload(ExamAttempt.participant))
+            .where(ExamAttempt.competition_id == competition_id)
+        )
+        admin_ids = get_settings().admin_ids
+        if admin_ids:
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+            stmt = stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+        stmt = stmt.order_by(
+            ExamAttempt.rank.asc().nulls_last(),
+            ExamAttempt.score.desc().nulls_last(),
+            ExamAttempt.completion_seconds.asc().nulls_last(),
+        )
+        attempts = list((await db.execute(stmt)).scalars().all())
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Header row
+        writer.writerow([
+            "Rank",
+            "Full Name",
+            "Membership ID",
+            "Telegram Username",
+            "Phone Number",
+            "Score",
+            "Total Questions",
+            "Correct Answers",
+            "Incorrect Answers",
+            "Completion Time (seconds)",
+            "Status",
+            "Started At (UTC)",
+            "Submitted At (UTC)",
+        ])
+
+        for idx, att in enumerate(attempts, start=1):
+            p = att.participant
+            rank_val = att.rank if att.rank is not None else idx
+            full_name = p.full_name if p and p.full_name else "N/A"
+            membership_id = p.membership_id if p and p.membership_id else "N/A"
+            tg_username = p.telegram_username if p and p.telegram_username else "N/A"
+            phone = p.phone_number if p and p.phone_number else "N/A"
+            score_val = att.score if att.score is not None else 0
+            correct_val = att.correct_count if att.correct_count is not None else 0
+            incorrect_val = att.incorrect_count if att.incorrect_count is not None else 0
+            time_val = round(att.completion_seconds, 1) if att.completion_seconds is not None else "N/A"
+            status_val = att.status.value if hasattr(att.status, "value") else str(att.status)
+            started_val = att.started_at.isoformat() if att.started_at else "N/A"
+            submitted_val = att.submitted_at.isoformat() if att.submitted_at else "N/A"
+
+            writer.writerow([
+                rank_val,
+                full_name,
+                membership_id,
+                tg_username,
+                phone,
+                score_val,
+                comp.question_count,
+                correct_val,
+                incorrect_val,
+                time_val,
+                status_val,
+                started_val,
+                submitted_val,
+            ])
+
+        clean_title = "".join(c for c in comp.title if c.isalnum() or c in (" ", "_", "-")).strip().replace(" ", "_")
+        filename = f"EMYC_Results_{clean_title}_{str(comp.id)[:8]}.csv"
+        return output.getvalue(), filename

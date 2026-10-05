@@ -202,4 +202,6 @@ MESSAGES = {
         "ውድድሩ በተያዘለት ሰዓት በራስ-ሰር ይከፈታል።"
     ),
     "error_generic_retry": "⚠️ ጥያቄዎን በማስኬድ ላይ ሳለ ጊዜያዊ ችግር ተከስቷል። እባክዎ እንደገና ይሞክሩ።",
+    "admin_btn_export_csv": "📥 ውጤቶችን በCSV አውርድ",
+    "admin_export_generating": "ይፋዊ የውጤት CSV በማዘጋጀት ላይ...",
 }

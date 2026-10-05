@@ -59,12 +59,18 @@ from app.bot.keyboards import (
 )
 
 
-async def get_user_lang(user_id: int) -> str:
-    """Helper to retrieve saved language for user or fallback to 'en'."""
+async def get_user_lang(user_id: int, context: Optional[ContextTypes.DEFAULT_TYPE] = None) -> str:
+    """Helper to retrieve saved language for user or fallback to 'en'.
+    Checks session context first for instant pre-registration responsiveness.
+    """
+    if context and hasattr(context, "user_data") and context.user_data and context.user_data.get("user_lang"):
+        return context.user_data["user_lang"]
     try:
         async with AsyncSessionLocal() as db:
             p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
             if p and p.language_code:
+                if context and hasattr(context, "user_data") and context.user_data is not None:
+                    context.user_data["user_lang"] = p.language_code
                 return p.language_code
     except Exception as e:
         logger.warning(f"Error retrieving language for user {user_id}: {e}")
@@ -97,7 +103,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     lang = "en"
     try:
-        lang = await get_user_lang(user.id)
+        lang = await get_user_lang(user.id, context=context)
     except Exception as e:
         logger.warning(f"Failed to fetch user language in cmd_start: {e}")
 
@@ -199,6 +205,8 @@ async def cb_select_language(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     chosen_lang = query.data.split(":")[1]
+    if context and hasattr(context, "user_data") and context.user_data is not None:
+        context.user_data["user_lang"] = chosen_lang
 
     async with AsyncSessionLocal() as db:
         await ParticipantService.update_language(db, update.effective_user.id, chosen_lang)
@@ -220,12 +228,17 @@ async def _send_or_edit(
     if hasattr(target, "edit_message_text"):
         try:
             await target.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-        except Exception:
+            return
+        except Exception as e:
+            if "message is not modified" in str(e).lower():
+                return
             plain = text.replace("*", "").replace("_", "").replace("`", "")
             try:
                 await target.edit_message_text(plain, reply_markup=reply_markup)
-            except Exception as e:
-                logger.warning(f"Failed to edit message in _send_or_edit: {e}")
+            except Exception as e2:
+                if "message is not modified" in str(e2).lower():
+                    return
+                logger.warning(f"Failed to edit message in _send_or_edit: {e2}")
     elif hasattr(target, "reply_text"):
         try:
             await target.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
@@ -233,8 +246,8 @@ async def _send_or_edit(
             plain = text.replace("*", "").replace("_", "").replace("`", "")
             try:
                 await target.reply_text(plain, reply_markup=reply_markup)
-            except Exception as e:
-                logger.warning(f"Failed to send reply in _send_or_edit: {e}")
+            except Exception as e2:
+                logger.warning(f"Failed to send reply in _send_or_edit: {e2}")
 
 
 async def render_competition_state_for_participant(
@@ -397,7 +410,7 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     await query.answer()
     user = update.effective_user
-    lang = await get_user_lang(user.id)
+    lang = await get_user_lang(user.id, context=context)
 
     try:
         async with AsyncSessionLocal() as db:

@@ -58,6 +58,7 @@ from app.bot.handlers.admin import (
     cb_admin_q_list,
     cb_admin_q_del,
     cb_admin_archive,
+    cb_admin_export_results,
 )
 
 settings = get_settings()
@@ -137,6 +138,7 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_results, pattern="^admin:results$"))
     app.add_handler(CallbackQueryHandler(cb_admin_finalize, pattern="^admin:finalize:"))
     app.add_handler(CallbackQueryHandler(cb_admin_publish, pattern="^admin:publish:"))
+    app.add_handler(CallbackQueryHandler(cb_admin_export_results, pattern="^admin:export_results:"))
     app.add_handler(CallbackQueryHandler(cb_admin_announce, pattern="^admin:announce$"))
     app.add_handler(CallbackQueryHandler(cb_admin_announce_confirm, pattern="^admin:announce_confirm$"))
 
