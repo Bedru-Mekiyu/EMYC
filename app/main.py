@@ -88,6 +88,12 @@ def create_app() -> FastAPI:
 
     app.include_router(api_v1_router)
 
+    # Static Telegram Mini App Hosting
+    import os
+    if os.path.exists("webapp"):
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/webapp", StaticFiles(directory="webapp", html=True), name="webapp")
+
     # Resilient Webhook Aliases (Ensures Telegram updates are accepted regardless of exact path)
     from app.api.v1.telegram_webhook import telegram_webhook
     app.add_api_route("/webhook", telegram_webhook, methods=["POST"], include_in_schema=False)

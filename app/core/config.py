@@ -24,11 +24,12 @@ class Settings(BaseSettings):
     # Competition Policies
     MANUAL_EARLY_CLOSURE_POLICY: Literal["truncate_to_close_time", "allow_in_progress_to_finish"] = "truncate_to_close_time"
 
-    # Telegram Bot
+    # Telegram Bot & Mini App
     TELEGRAM_BOT_TOKEN: str = "mock_token_for_tests"
     BOT_MODE: Literal["polling", "webhook", "disabled"] = "polling"
     WEBHOOK_URL: Optional[str] = None
     WEBHOOK_SECRET: Optional[str] = None
+    WEBAPP_URL: Optional[str] = None
 
     # Administrative Telegram user IDs
     ADMIN_TELEGRAM_IDS: str = ""

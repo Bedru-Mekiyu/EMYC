@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>EMYC Online Examination</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Network Status Toast -->
+  <div id="toast-network" class="network-toast">
+    <span id="toast-icon">📶</span>
+    <span id="toast-text">Network status</span>
+  </div>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-logo">E</div>
+      <div class="brand-info">
+        <h1 id="lbl-title">EMYC Exam</h1>
+        <p id="lbl-participant">Student</p>
+      </div>
+    </div>
+    <div id="timer-box" class="timer-badge">
+      <span>⏱️</span>
+      <span id="timer-text">--:--</span>
+    </div>
+  </header>
+
+  <!-- Progress Bar -->
+  <div class="progress-bar-container">
+    <div id="progress-fill" class="progress-bar-fill"></div>
+  </div>
+
+  <!-- Loading State -->
+  <div id="view-loading" class="status-screen">
+    <div class="spinner"></div>
+    <h3 id="lbl-loading">Loading examination session...</h3>
+  </div>
+
+  <!-- Exam Main Interface -->
+  <main id="view-exam" class="main-content" style="display: none;">
+    <div class="question-card">
+      <div class="question-meta">
+        <span id="lbl-question-badge" class="question-badge">Question 1 of 100</span>
+        <div class="meta-right-actions">
+          <button id="btn-flag-toggle" class="btn-flag">
+            <span>🚩</span> <span id="lbl-flag-text">Flag</span>
+          </button>
+          <span id="lbl-answer-status" class="status-pill">Unanswered</span>
+        </div>
+      </div>
+      <div id="question-text" class="question-text">
+        Question text will load here...
+      </div>
+    </div>
+
+    <!-- Options Container -->
+    <div id="options-container" class="options-list">
+      <!-- Options A, B, C, D injected dynamically -->
+    </div>
+  </main>
+
+  <!-- Bottom Navigation Action Bar -->
+  <nav id="bottom-bar" class="bottom-controls" style="display: none;">
+    <button id="btn-prev" class="btn btn-secondary">
+      <span>◀</span> <span id="lbl-prev">Prev</span>
+    </button>
+    <button id="btn-grid" class="btn btn-secondary">
+      <span>🗺️</span> <span id="lbl-grid">100</span>
+    </button>
+    <button id="btn-clear" class="btn btn-secondary">
+      <span>🗑️</span> <span id="lbl-clear">Clear</span>
+    </button>
+    <button id="btn-next" class="btn btn-secondary">
+      <span id="lbl-next">Next</span> <span>▶</span>
+    </button>
+    <button id="btn-finish" class="btn btn-primary">
+      <span id="lbl-finish">Submit</span>
+    </button>
+  </nav>
+
+  <!-- Question Navigator / Grid Modal -->
+  <div id="modal-grid" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="lbl-matrix-title">Question Navigator</h3>
+        <button id="btn-close-grid" class="btn btn-secondary" style="padding: 6px 12px;">✕</button>
+      </div>
+      <!-- Filter Tabs -->
+      <div class="filter-tabs">
+        <div id="tab-filter-all" class="filter-tab active">All (<span id="count-all">100</span>)</div>
+        <div id="tab-filter-unans" class="filter-tab">Unanswered (<span id="count-unans">100</span>)</div>
+        <div id="tab-filter-flagged" class="filter-tab">Flagged (<span id="count-flagged">0</span>)</div>
+      </div>
+      <div class="grid-legend">
+        <div class="legend-item"><span class="legend-dot answered"></span> <span id="lbl-legend-ans">Answered</span></div>
+        <div class="legend-item"><span class="legend-dot unanswered"></span> <span id="lbl-legend-unans">Unanswered</span></div>
+        <div class="legend-item"><span class="legend-dot flagged"></span> <span id="lbl-legend-flagged">Flagged</span></div>
+        <div class="legend-item"><span class="legend-dot current"></span> <span id="lbl-legend-cur">Current</span></div>
+      </div>
+      <div id="matrix-container" class="question-grid">
+        <!-- 1..100 grid bubbles generated dynamically -->
+      </div>
+      <button id="btn-finish-from-grid" class="btn btn-accent" style="width: 100%;">
+        🚀 <span id="lbl-finish-from-grid">Review & Submit Exam</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Final Submission Confirmation Modal -->
+  <div id="modal-confirm" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="lbl-confirm-title">Submit Examination?</h3>
+        <button id="btn-close-confirm" class="btn btn-secondary" style="padding: 6px 12px;">✕</button>
+      </div>
+      <p id="lbl-confirm-msg" style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+        Are you sure you want to finalize your exam? Once submitted, your answers cannot be changed.
+      </p>
+      <div id="confirm-warning-box" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); padding: 12px; border-radius: 12px; color: #ef4444; font-size: 13px; font-weight: 600; margin-bottom: 20px;">
+        ⚠️ Warning: You have unanswered questions.
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button id="btn-cancel-submit" class="btn btn-secondary" style="flex: 1;">Cancel</button>
+        <button id="btn-do-submit" class="btn btn-accent" style="flex: 1.4;">Yes, Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result Screen -->
+  <div id="view-result" class="status-screen" style="display: none;">
+    <div style="font-size: 54px;">🏆</div>
+    <h2 id="lbl-result-title">Exam Submitted!</h2>
+    <div class="score-box">
+      <div id="result-score" class="score-number">--</div>
+      <div id="lbl-score-caption" style="font-size: 13px; color: var(--text-secondary);">Total Score</div>
+      <div style="display: flex; justify-content: space-around; margin-top: 18px; border-top: 1px solid var(--card-border); padding-top: 14px;">
+        <div>
+          <span style="color: var(--accent-emerald); font-weight: 700;" id="result-correct">0</span>
+          <div style="font-size: 11px; color: var(--text-secondary);">Correct</div>
+        </div>
+        <div>
+          <span style="color: var(--accent-danger); font-weight: 700;" id="result-incorrect">0</span>
+          <div style="font-size: 11px; color: var(--text-secondary);">Incorrect</div>
+        </div>
+        <div>
+          <span style="color: var(--accent-blue); font-weight: 700;" id="result-time">0s</span>
+          <div style="font-size: 11px; color: var(--text-secondary);">Time Taken</div>
+        </div>
+      </div>
+    </div>
+    <p id="lbl-result-msg" style="color: var(--text-secondary); font-size: 13px;">
+      Your answers have been securely recorded. Official ranks and certificates will be released when the competition closes.
+    </p>
+    <button id="btn-exit" class="btn btn-primary" style="width: 100%;">
+      Exit to Telegram
+    </button>
+  </div>
+
+  <!-- Error / Status Screen -->
+  <div id="view-error" class="status-screen" style="display: none;">
+    <div style="font-size: 48px;" id="error-icon">⚠️</div>
+    <h2 id="error-title">Notice</h2>
+    <p id="error-desc">An error occurred.</p>
+    <button id="btn-error-action" class="btn btn-primary">Try Again</button>
+  </div>
+
+  <!-- Scripts -->
+  <script src="locales.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

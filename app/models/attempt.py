@@ -70,6 +70,10 @@ class ExamAttempt(Base):
     completion_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     rank: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
+    # High-concurrency batch storage (stores full 100-answer submission in 1 write)
+    answers_summary: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    question_sequence: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
+
     __table_args__ = (
         # 1 official attempt per participant per competition
         UniqueConstraint(

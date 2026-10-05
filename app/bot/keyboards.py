@@ -61,12 +61,24 @@ def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
 
 
 def get_start_exam_keyboard(competition_id: uuid.UUID, lang: str = "en") -> InlineKeyboardMarkup:
-    """Confirmation to launch competition attempt."""
-    keyboard = [
-        [InlineKeyboardButton(get_text("start_exam_btn", lang), callback_data=f"exam:start:{competition_id}")],
-        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    """Confirmation to launch competition attempt.
+    If WEBAPP_URL is configured, provides a high-throughput Telegram Mini App button
+    alongside the standard Telegram chat option.
+    """
+    from app.core.config import get_settings
+    settings = get_settings()
+    webapp_url = getattr(settings, "WEBAPP_URL", None)
+
+    rows = []
+    if webapp_url:
+        from telegram import WebAppInfo
+        rows.append([InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=webapp_url))])
+        rows.append([InlineKeyboardButton(f"💬 {get_text('start_exam_btn', lang)} (Bot Chat)", callback_data=f"exam:start:{competition_id}")])
+    else:
+        rows.append([InlineKeyboardButton(get_text("start_exam_btn", lang), callback_data=f"exam:start:{competition_id}")])
+
+    rows.append([InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")])
+    return InlineKeyboardMarkup(rows)
 
 
 def get_question_keyboard(
