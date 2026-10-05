@@ -120,6 +120,12 @@
     return 'user=%7B%22id%22%3A12345678%2C%22username%22%3A%22teststudent%22%2C%22first_name%22%3A%22Student%22%7D&auth_date=1791211002&hash=test_valid_mock_hash';
   }
 
+  // Backend API base URL.
+  // When deployed on Cloudflare Pages, set this to your Render backend URL.
+  // Example: 'https://your-app-name.onrender.com'
+  // Leave empty ('') when the backend serves the webapp/ folder directly.
+  const BACKEND_URL = '';
+
   const authHeaders = {
     'Content-Type': 'application/json',
     'X-Telegram-Init-Data': getInitData(),
@@ -140,7 +146,7 @@
     showView('loading');
 
     try {
-      const res = await fetch('/api/v1/webapp/session', {
+      const res = await fetch(`${BACKEND_URL}/api/v1/webapp/session`, {
         method: 'GET',
         headers: authHeaders,
       });
@@ -472,7 +478,7 @@
     };
 
     try {
-      const res = await fetch('/api/v1/webapp/submit', {
+      const res = await fetch(`${BACKEND_URL}/api/v1/webapp/submit`, {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify(payload),
