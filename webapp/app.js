@@ -124,7 +124,7 @@
   // When deployed on Cloudflare Pages, set this to your Render backend URL.
   // Example: 'https://your-app-name.onrender.com'
   // Leave empty ('') when the backend serves the webapp/ folder directly.
-   const BACKEND_URL = 'https://your-app-name.onrender.com'; 
+   const BACKEND_URL = 'https://emyc.onrender.com'; 
 
   const authHeaders = {
     'Content-Type': 'application/json',
