@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any
-from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, JSON
+from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, JSON, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -12,7 +12,10 @@ class CompetitionQuestion(Base):
     __tablename__ = "competition_questions"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
     competition_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -29,6 +32,7 @@ class CompetitionQuestion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
+        server_default=text("now()"),
         nullable=False,
     )
 
