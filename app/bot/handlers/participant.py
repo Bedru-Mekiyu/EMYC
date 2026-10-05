@@ -247,15 +247,26 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     await query.edit_message_text(admin_hint, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
                     return
 
-                latest_comp = (await db.execute(select(Competition).order_by(Competition.created_at.desc()).limit(1))).scalar_one_or_none()
-                if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+                latest_comp = await CompetitionService.get_open_or_scheduled_competition(db)
+                if not latest_comp:
+                    latest_comp = (await db.execute(select(Competition).order_by(Competition.created_at.desc()).limit(1))).scalar_one_or_none()
+
+                if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
                     sched = format_schedule_window(latest_comp.opens_at, latest_comp.closes_at)
                     meta = format_meta_line(latest_comp.duration_minutes, latest_comp.question_count)
-                    text = get_text("competition_not_open", lang, schedule=sched, details=meta, opens_at=sched, closes_at=meta)
+                    text = get_text(
+                        "competition_not_open",
+                        lang,
+                        title=latest_comp.title,
+                        schedule=sched,
+                        details=meta,
+                        opens_at=sched,
+                        closes_at=meta,
+                    )
                 elif latest_comp and latest_comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
                     text = get_text("competition_closed", lang)
                 else:
-                    text = get_text("competition_not_open", lang, schedule="Schedule TBA", details="", opens_at="Soon", closes_at="TBA")
+                    text = get_text("competition_not_open", lang, title="EMYC Competition", schedule="Schedule TBA", details="", opens_at="Soon", closes_at="TBA")
                 await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang), parse_mode=ParseMode.MARKDOWN)
                 return
 
@@ -415,21 +426,16 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     dur_val = int(clean_val)
                     if 1 <= dur_val <= 1440:
                         wizard["duration"] = dur_val
-                        now = datetime.now(timezone.utc)
-                        wizard["opens_at"] = now
-                        wizard["closes_at"] = now + timedelta(minutes=dur_val)
-                        wizard["step"] = "questions"
-                        from app.core.time_utils import format_friendly_duration
-                        from app.bot.keyboards import get_admin_create_comp_questions_keyboard
+                        wizard["step"] = "schedule"
                         prompt = (
-                            f"📝 *Create New EMYC Competition: Question Setup*\n\n"
+                            f"📅 *Create New EMYC Competition (Step 4/4)*\n\n"
                             f"*Title:* {wizard.get('title', 'Competition')}\n"
-                            f"*Duration:* {format_friendly_duration(dur_val)}\n\n"
-                            f"How would you like to configure questions for this competition?"
+                            f"*Duration:* {dur_val} minutes\n\n"
+                            f"Select the competition open window:"
                         )
                         await update.message.reply_text(
                             prompt,
-                            reply_markup=get_admin_create_comp_questions_keyboard(),
+                            reply_markup=get_admin_create_comp_schedule_keyboard(lang=lang),
                             parse_mode=ParseMode.MARKDOWN,
                         )
                         return
@@ -483,16 +489,14 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 async with AsyncSessionLocal() as db:
                     comp = await db.get(Competition, uuid.UUID(comp_id_str))
                     if comp:
-                        comp.duration_minutes = dur_minutes
-                        if comp.status == CompetitionStatus.LIVE:
-                            comp.closes_at = comp.opens_at + td
-                        else:
-                            comp.opens_at = now
-                            comp.closes_at = now + td
+                        comp.closes_at = comp.opens_at + td
+                        if comp.status == CompetitionStatus.LIVE and comp.actual_exam_started_at:
+                            comp.actual_exam_ends_at = comp.actual_exam_started_at + td
+                            comp.closes_at = max(comp.closes_at, comp.actual_exam_ends_at)
                         await db.commit()
                 sched_label = format_timedelta_friendly(td)
                 await update.message.reply_text(
-                    f"✅ *Schedule Updated!*\n\nCompetition duration is now set to *{sched_label}*.",
+                    f"✅ *Schedule Updated!*\n\nCompetition schedule / duration is now set to *{sched_label}*.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
                     parse_mode=ParseMode.MARKDOWN,
                 )

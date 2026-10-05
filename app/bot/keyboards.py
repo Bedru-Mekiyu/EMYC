@@ -319,6 +319,7 @@ def get_admin_create_comp_schedule_keyboard(lang: str = "en") -> InlineKeyboardM
             InlineKeyboardButton("📅 14 Days", callback_data="admin:create_sched:14d"),
         ],
         [
+            InlineKeyboardButton("📅 30 Days (1 Month)", callback_data="admin:create_sched:30d"),
             InlineKeyboardButton(get_text("admin_btn_custom_sched", lang), callback_data="admin:create_sched:custom"),
         ],
         [InlineKeyboardButton(get_text("btn_cancel", lang), callback_data="admin:competition")],

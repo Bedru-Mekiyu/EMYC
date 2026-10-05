@@ -12,6 +12,7 @@ from app.core.database import Base
 class CompetitionStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     SCHEDULED = "SCHEDULED"
+    OPEN = "OPEN"
     LIVE = "LIVE"
     CLOSED = "CLOSED"
     RESULTS_FINALIZED = "RESULTS_FINALIZED"
@@ -37,6 +38,12 @@ class Competition(Base):
     closes_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    actual_exam_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    actual_exam_ends_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

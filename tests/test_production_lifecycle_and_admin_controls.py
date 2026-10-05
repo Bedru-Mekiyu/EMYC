@@ -255,9 +255,21 @@ async def test_admin_create_competition_interactive_wizard(db_session: AsyncSess
 
     await cb_admin_create_duration(update_dur, context)
     assert context.user_data["create_comp"]["duration"] == 60
+    assert context.user_data["create_comp"]["step"] == "schedule"
+
+    # 5. Select Schedule Window (7 days)
+    query_sched = MagicMock()
+    query_sched.data = "admin:create_sched:7d"
+    query_sched.answer = AsyncMock()
+    query_sched.edit_message_text = AsyncMock()
+    update_sched = MagicMock(spec=Update)
+    update_sched.effective_user = admin_user
+    update_sched.callback_query = query_sched
+
+    await cb_admin_create_schedule(update_sched, context)
     assert context.user_data["create_comp"]["step"] == "questions"
 
-    # 5. Attach Standard Questions
+    # 6. Attach Standard Questions
     query_q = MagicMock()
     query_q.data = "admin:create_q:standard"
     query_q.answer = AsyncMock()
@@ -1039,9 +1051,20 @@ async def test_admin_custom_duration_flow(db_session: AsyncSession):
     await handle_text_message(update_valid, context)
 
     assert context.user_data["create_comp"]["duration"] == 75
+    assert context.user_data["create_comp"]["step"] == "schedule"
+
+    # 7. Select schedule window
+    query_sched = MagicMock()
+    query_sched.data = "admin:create_sched:7d"
+    query_sched.answer = AsyncMock()
+    query_sched.edit_message_text = AsyncMock()
+    update_sched = MagicMock(spec=Update)
+    update_sched.effective_user = admin_user
+    update_sched.callback_query = query_sched
+    await cb_admin_create_schedule(update_sched, context)
     assert context.user_data["create_comp"]["step"] == "questions"
 
-    # 7. Create with standard questions
+    # 8. Create with standard questions
     query_q = MagicMock()
     query_q.data = "admin:create_q:standard"
     query_q.answer = AsyncMock()

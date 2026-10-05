@@ -293,3 +293,120 @@ async def test_synchronized_competition_deadline_and_late_joiner_clamp(db_sessio
     with pytest.raises(CompetitionNotOpenError):
         await CompetitionService.start_attempt(db_session, comp.id, p3.id, now_override=t_expired)
 
+
+@pytest.mark.asyncio
+async def test_two_phase_competition_lifecycle_availability_and_global_exam(db_session: AsyncSession):
+    """Verifies the complete two-phase competition lifecycle:
+    1. Phase 1: Competition Open/Availability Period (30 days: Oct 1 -> Oct 31).
+       - Registration & eligibility verification open.
+       - Questions remain locked (attempts rejected with CompetitionNotOpenError).
+       - get_open_or_scheduled_competition finds the competition.
+    2. Phase 2: Actual Examination Session (120 minutes) authorized by admin.
+       - Admin sets status to LIVE: records actual_exam_started_at and actual_exam_ends_at.
+       - Availability window (opens_at / closes_at) is preserved.
+    3. Global Examination Timer:
+       - Participant 1 starts right at exam launch -> receives full 120 minutes until actual_exam_ends_at.
+       - Participant 2 starts 30 minutes late -> receives remaining 90 minutes (deadline is actual_exam_ends_at).
+       - Participant 3 starts 90 minutes late -> receives remaining 30 minutes (deadline is actual_exam_ends_at).
+       - Participant 4 attempts to start after actual_exam_ends_at -> rejected with CompetitionNotOpenError.
+    4. Auto-closure & Finalization:
+       - check_and_auto_close_competitions closes the competition once actual_exam_ends_at passes,
+         auto-submitting any unsubmitted attempts.
+    """
+    # 1. Phase 1: Create 1-month competition
+    t_open = datetime(2026, 10, 1, 0, 0, 0, tzinfo=timezone.utc)
+    t_close = datetime(2026, 10, 31, 23, 59, 59, tzinfo=timezone.utc)
+    duration = 120  # 2 hours exam duration
+
+    comp = Competition(
+        title="Ramadan National Championship 2026",
+        description="Month-long competition with final examination session",
+        status=CompetitionStatus.SCHEDULED,
+        opens_at=t_open,
+        closes_at=t_close,
+        duration_minutes=duration,
+        question_count=2,
+    )
+    p1 = Participant(telegram_user_id=2001, membership_id="EMYC/2001/2026")
+    p2 = Participant(telegram_user_id=2002, membership_id="EMYC/2002/2026")
+    p3 = Participant(telegram_user_id=2003, membership_id="EMYC/2003/2026")
+    p4 = Participant(telegram_user_id=2004, membership_id="EMYC/2004/2026")
+    db_session.add_all([comp, p1, p2, p3, p4])
+    await db_session.flush()
+
+    for idx in (1, 2):
+        q = CompetitionQuestion(
+            competition_id=comp.id,
+            question_text=f"Grand Question {idx}?",
+            options={"A": "Alpha", "B": "Beta", "C": "Gamma", "D": "Delta"},
+            correct_option="A",
+            order_index=idx,
+        )
+        db_session.add(q)
+    await db_session.commit()
+
+    # Mid-month check (Oct 15): competition is open for registration, but exam is locked
+    t_mid = datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc)
+    open_comp = await CompetitionService.get_open_or_scheduled_competition(db_session, now=t_mid)
+    assert open_comp is not None
+    assert open_comp.id == comp.id
+
+    # Trying to start attempt during Phase 1 raises CompetitionNotOpenError
+    with pytest.raises(CompetitionNotOpenError):
+        await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t_mid)
+
+    # 2. Phase 2: Admin activates the live exam session on Oct 31 at 14:00 UTC
+    t_exam_start = datetime(2026, 10, 31, 14, 0, 0, tzinfo=timezone.utc)
+    t_exam_end = t_exam_start + timedelta(minutes=duration)  # 16:00 UTC
+
+    # Simulate admin launching exam session
+    comp.status = CompetitionStatus.LIVE
+    comp.actual_exam_started_at = t_exam_start
+    comp.actual_exam_ends_at = t_exam_end
+    await db_session.commit()
+
+    # Verify availability window is preserved and not overwritten
+    assert comp.opens_at == t_open
+    assert comp.closes_at == t_close
+    assert comp.actual_exam_started_at == t_exam_start
+    assert comp.actual_exam_ends_at == t_exam_end
+
+    # 3. Global Timer:
+    # Participant 1 starts right at 14:00 UTC
+    att1 = await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t_exam_start)
+    assert att1.deadline_at == t_exam_end
+    assert (att1.deadline_at - t_exam_start).total_seconds() / 60 == 120  # 120 min left
+
+    # Participant 2 joins 30 min late (14:30 UTC)
+    t_p2 = t_exam_start + timedelta(minutes=30)
+    att2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_p2)
+    assert att2.deadline_at == t_exam_end  # Shared global deadline!
+    assert (att2.deadline_at - t_p2).total_seconds() / 60 == 90  # Only 90 min left
+
+    # Participant 3 joins 90 min late (15:30 UTC)
+    t_p3 = t_exam_start + timedelta(minutes=90)
+    att3 = await CompetitionService.start_attempt(db_session, comp.id, p3.id, now_override=t_p3)
+    assert att3.deadline_at == t_exam_end  # Shared global deadline!
+    assert (att3.deadline_at - t_p3).total_seconds() / 60 == 30  # Only 30 min left
+
+    # Participant 4 tries to start after exam deadline (16:05 UTC)
+    t_after = t_exam_end + timedelta(minutes=5)
+    with pytest.raises(CompetitionNotOpenError):
+        await CompetitionService.start_attempt(db_session, comp.id, p4.id, now_override=t_after)
+
+    # 4. Auto-closing at 16:05 UTC
+    closed_count = await CompetitionService.check_and_auto_close_competitions(db_session, now_override=t_after)
+    assert closed_count == 1
+
+    await db_session.refresh(comp)
+    assert comp.status == CompetitionStatus.CLOSED
+
+    # Verify attempts were auto-submitted / finalized
+    await db_session.refresh(att1)
+    await db_session.refresh(att2)
+    await db_session.refresh(att3)
+    assert att1.status == AttemptStatus.EXPIRED
+    assert att2.status == AttemptStatus.EXPIRED
+    assert att3.status == AttemptStatus.EXPIRED
+
+

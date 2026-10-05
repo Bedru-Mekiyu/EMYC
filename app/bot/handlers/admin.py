@@ -275,20 +275,20 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
             else:
                 buttons.append([InlineKeyboardButton("🟢 Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-            buttons.append([InlineKeyboardButton("⏱ Set Exam Duration", callback_data=f"admin:edit_sched:{comp.id}")])
+            buttons.append([InlineKeyboardButton("✏️ Edit Schedule Window", callback_data=f"admin:edit_sched:{comp.id}")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
             buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
 
-        elif comp.status == CompetitionStatus.SCHEDULED:
+        elif comp.status in [CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
             if existing_q_count == 0 and comp.question_count == 0:
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
             else:
                 buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
-            buttons.append([InlineKeyboardButton("⏱ Set Exam Duration", callback_data=f"admin:edit_sched:{comp.id}")])
+            buttons.append([InlineKeyboardButton("✏️ Edit Schedule Window", callback_data=f"admin:edit_sched:{comp.id}")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.LIVE:
-            buttons.append([InlineKeyboardButton("⏱ Extend / Edit Duration", callback_data=f"admin:edit_sched:{comp.id}")])
+            buttons.append([InlineKeyboardButton("✏️ Extend / Edit Open Window", callback_data=f"admin:edit_sched:{comp.id}")])
             buttons.append([InlineKeyboardButton("⏹ Close Competition", callback_data=f"admin:set_closed:{comp.id}")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
 
@@ -315,12 +315,16 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
         meta_str = format_meta_line(comp.duration_minutes, existing_q_count)
         safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
 
+        exam_session_str = ""
+        if comp.actual_exam_started_at and comp.actual_exam_ends_at:
+            exam_session_str = f"\n• *Live Exam Session:* {format_schedule_window(comp.actual_exam_started_at, comp.actual_exam_ends_at)}"
+
         text = (
             f"🏆 *Competition Control*\n\n"
             f"*{safe_title}*\n\n"
             f"• *Status:* {status_label}\n"
             f"• *Schedule:* {sched_str}\n"
-            f"• *Format:* {meta_str}\n"
+            f"• *Format:* {meta_str}{exam_session_str}\n"
         )
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
 
@@ -345,24 +349,29 @@ async def cb_admin_edit_schedule(update: Update, context: ContextTypes.DEFAULT_T
         safe_title = comp.title.replace("*", "").replace("_", " ").replace("`", "")
 
         prompt = (
-            f"⏱ *Edit Competition Schedule & Duration*\n\n"
+            f"📅 *Edit Competition Schedule*\n\n"
             f"*{safe_title}* ({status_label})\n"
-            f"• *Current Format:* {meta_str}\n"
-            f"• *Schedule:* {sched_str}\n\n"
-            f"Select competition exam duration:"
+            f"• *Current Schedule:* {sched_str}\n"
+            f"• *Format:* {meta_str}\n\n"
+            f"Select a new open window or specify a custom window:"
         )
 
         buttons = [
             [
-                InlineKeyboardButton("⏱ 30 Minutes", callback_data=f"admin:apply_sched:{comp.id}:30m"),
-                InlineKeyboardButton("⏱ 1 Hour (60m)", callback_data=f"admin:apply_sched:{comp.id}:60m"),
+                InlineKeyboardButton("📅 24 Hours", callback_data=f"admin:apply_sched:{comp.id}:24h"),
+                InlineKeyboardButton("📅 3 Days", callback_data=f"admin:apply_sched:{comp.id}:3d"),
             ],
             [
-                InlineKeyboardButton("⏱ 1.5 Hours (90m)", callback_data=f"admin:apply_sched:{comp.id}:90m"),
-                InlineKeyboardButton("⏱ 2 Hours (120m)", callback_data=f"admin:apply_sched:{comp.id}:120m"),
+                InlineKeyboardButton("📅 7 Days", callback_data=f"admin:apply_sched:{comp.id}:7d"),
+                InlineKeyboardButton("📅 14 Days", callback_data=f"admin:apply_sched:{comp.id}:14d"),
             ],
             [
+                InlineKeyboardButton("📅 30 Days (1 Month)", callback_data=f"admin:apply_sched:{comp.id}:30d"),
                 InlineKeyboardButton(get_text("admin_btn_custom_sched", lang), callback_data=f"admin:apply_sched:{comp.id}:custom"),
+            ],
+            [
+                InlineKeyboardButton("⏱ 30m Duration", callback_data=f"admin:apply_sched:{comp.id}:30m"),
+                InlineKeyboardButton("⏱ 60m Duration", callback_data=f"admin:apply_sched:{comp.id}:60m"),
             ],
             [InlineKeyboardButton("◀️ Back to Competition", callback_data="admin:competition")],
         ]
@@ -372,7 +381,7 @@ async def cb_admin_edit_schedule(update: Update, context: ContextTypes.DEFAULT_T
 
 @require_admin
 async def cb_admin_apply_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Applies new duration and schedule to existing competition."""
+    """Applies new schedule window or duration to existing competition."""
     query = update.callback_query
     parts = query.data.split(":")
     comp_id = uuid.UUID(parts[2])
@@ -388,18 +397,18 @@ async def cb_admin_apply_schedule(update: Update, context: ContextTypes.DEFAULT_
 
     now = datetime.now(timezone.utc)
     delta_map = {
-        "15m": 15,
-        "30m": 30,
-        "60m": 60,
-        "90m": 90,
-        "120m": 120,
-        "24h": 24 * 60,
-        "3d": 3 * 24 * 60,
-        "7d": 7 * 24 * 60,
-        "14d": 14 * 24 * 60,
+        "15m": timedelta(minutes=15),
+        "30m": timedelta(minutes=30),
+        "60m": timedelta(minutes=60),
+        "90m": timedelta(minutes=90),
+        "120m": timedelta(minutes=120),
+        "24h": timedelta(hours=24),
+        "3d": timedelta(days=3),
+        "7d": timedelta(days=7),
+        "14d": timedelta(days=14),
+        "30d": timedelta(days=30),
     }
-    dur_minutes = delta_map.get(sched_key, 60)
-    td = timedelta(minutes=dur_minutes)
+    td = delta_map.get(sched_key, timedelta(days=7))
 
     async with AsyncSessionLocal() as db:
         comp = await db.get(Competition, comp_id)
@@ -407,16 +416,17 @@ async def cb_admin_apply_schedule(update: Update, context: ContextTypes.DEFAULT_
             await query.answer("Competition not found.", show_alert=True)
             return
 
-        comp.duration_minutes = dur_minutes
-        if comp.status == CompetitionStatus.LIVE:
+        if td.total_seconds() >= 24 * 3600:
             comp.closes_at = comp.opens_at + td
         else:
-            comp.opens_at = now
-            comp.closes_at = now + td
+            comp.duration_minutes = int(td.total_seconds() / 60)
+            if comp.status == CompetitionStatus.LIVE and comp.actual_exam_started_at:
+                comp.actual_exam_ends_at = comp.actual_exam_started_at + td
+                comp.closes_at = max(comp.closes_at, comp.actual_exam_ends_at)
 
         await db.commit()
 
-    await query.answer("Duration updated successfully!", show_alert=False)
+    await query.answer("Schedule updated successfully!", show_alert=False)
     await cb_admin_competition(update, context)
 
 
@@ -564,10 +574,13 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
             if existing_count > 0:
                 target_comp.question_count = existing_count
             now = datetime.now(timezone.utc)
-            # Live Synchronous Competition:
-            # Start countdown NOW and close strictly in exactly duration_minutes
-            target_comp.opens_at = now
-            target_comp.closes_at = now + timedelta(minutes=target_comp.duration_minutes)
+            # Live Synchronous Examination Session:
+            target_comp.actual_exam_started_at = now
+            target_comp.actual_exam_ends_at = now + timedelta(minutes=target_comp.duration_minutes)
+            if not target_comp.opens_at or target_comp.opens_at > now:
+                target_comp.opens_at = now
+            if not target_comp.closes_at or target_comp.closes_at < target_comp.actual_exam_ends_at:
+                target_comp.closes_at = target_comp.actual_exam_ends_at
             await db.commit()
 
         try:
@@ -1077,24 +1090,21 @@ async def cb_admin_create_duration(update: Update, context: ContextTypes.DEFAULT
 
     duration = int(data_part)
     wizard["duration"] = duration
-    now = datetime.now(timezone.utc)
-    wizard["opens_at"] = now
-    wizard["closes_at"] = now + timedelta(minutes=duration)
-    wizard["step"] = "questions"
+    wizard["step"] = "schedule"
     lang = context.user_data.get("admin_lang", "en")
 
     from app.core.time_utils import format_friendly_duration
-    from app.bot.keyboards import get_admin_create_comp_questions_keyboard
+    from app.bot.keyboards import get_admin_create_comp_schedule_keyboard
 
     prompt = (
-        f"📝 *Create New EMYC Competition: Question Setup*\n\n"
+        f"📅 *Create New EMYC Competition (Step 4/5: Schedule Window)*\n\n"
         f"*Title:* {wizard.get('title', 'Competition')}\n"
-        f"*Duration:* {format_friendly_duration(duration)}\n\n"
-        f"How would you like to configure questions for this competition?"
+        f"*Exam Duration:* {format_friendly_duration(duration)}\n\n"
+        f"Select the competition open/availability window:"
     )
     await query.edit_message_text(
         prompt,
-        reply_markup=get_admin_create_comp_questions_keyboard(),
+        reply_markup=get_admin_create_comp_schedule_keyboard(lang=lang),
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -1121,6 +1131,7 @@ async def cb_admin_create_schedule(update: Update, context: ContextTypes.DEFAULT
         "3d": timedelta(days=3),
         "7d": timedelta(days=7),
         "14d": timedelta(days=14),
+        "30d": timedelta(days=30),
     }
     close_delta = delta_map.get(sched_key, timedelta(days=7))
 
