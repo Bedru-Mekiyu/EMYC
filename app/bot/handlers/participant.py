@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from sqlalchemy import select, and_, func
@@ -45,6 +45,7 @@ from app.core.time_utils import (
 from app.bot.keyboards import (
     get_main_menu_keyboard,
     get_membership_prompt_keyboard,
+    get_share_phone_keyboard,
     get_language_keyboard,
     get_start_exam_keyboard,
     get_question_keyboard,
@@ -103,6 +104,29 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         async with AsyncSessionLocal() as db:
             participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+            if not participant:
+                reg_data = context.user_data.get("registration")
+                if reg_data:
+                    step = reg_data.get("step")
+                    if step == "phone":
+                        prompt = get_text("reg_share_phone_prompt", lang)
+                        kb = get_share_phone_keyboard(lang)
+                        if update.message:
+                            await update.message.reply_text(prompt, reply_markup=kb)
+                        elif update.callback_query:
+                            await update.callback_query.answer()
+                            if update.callback_query.message:
+                                await update.callback_query.message.reply_text(prompt, reply_markup=kb)
+                        return
+                    elif step == "full_name":
+                        prompt = get_text("reg_membership_verified_prompt_name", lang)
+                        if update.message:
+                            await update.message.reply_text(prompt)
+                        elif update.callback_query:
+                            await update.callback_query.answer()
+                            await update.callback_query.edit_message_text(prompt)
+                        return
+
             if participant:
                 pub_res = await db.execute(
                     select(ExamAttempt.competition_id)
@@ -196,8 +220,22 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         async with AsyncSessionLocal() as db:
             participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
 
-            # 1. Unregistered -> Prompt for Membership ID
+            # 1. Unregistered -> Check if registration in progress or prompt for Membership ID
             if not participant:
+                reg_data = context.user_data.get("registration")
+                if reg_data:
+                    step = reg_data.get("step")
+                    if step == "phone":
+                        prompt = get_text("reg_share_phone_prompt", lang)
+                        kb = get_share_phone_keyboard(lang)
+                        if query.message:
+                            await query.message.reply_text(prompt, reply_markup=kb)
+                        return
+                    elif step == "full_name":
+                        prompt = get_text("reg_membership_verified_prompt_name", lang)
+                        await query.edit_message_text(prompt)
+                        return
+
                 context.user_data["awaiting_membership"] = True
                 prompt = get_text("membership_prompt", lang)
                 await query.edit_message_text(
@@ -636,13 +674,48 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 return
 
-    # Case D: Participant Membership ID input
+    # Case D.1: Participant Registration state machine (Full Name & Phone text fallback)
+    reg_data = context.user_data.get("registration")
+    if reg_data:
+        step = reg_data.get("step")
+        if step == "full_name":
+            clean_name = text.strip()
+            # Validate full name: not empty, min 2 chars, max 100 chars, not a bot command
+            if not clean_name or len(clean_name) < 2 or len(clean_name) > 100 or clean_name.startswith("/"):
+                err_prompt = get_text("reg_enter_name_invalid", lang)
+                await update.message.reply_text(err_prompt)
+                return
+
+            reg_data["full_name"] = clean_name
+            # Authoritative username from Telegram user object
+            username_str = f"@{user.username.lstrip('@')}" if user.username else None
+            reg_data["telegram_username"] = username_str
+            reg_data["step"] = "phone"
+
+            phone_prompt = get_text("reg_share_phone_prompt", lang)
+            await update.message.reply_text(
+                phone_prompt,
+                reply_markup=get_share_phone_keyboard(lang),
+            )
+            return
+
+        elif step == "phone":
+            # Participant typed text instead of tapping the native contact button
+            reminder = get_text("reg_phone_rejected_not_owner", lang)
+            await update.message.reply_text(
+                reminder,
+                reply_markup=get_share_phone_keyboard(lang),
+            )
+            return
+
+    # Case D.2: Participant Membership ID input
     is_awaiting = context.user_data.get("awaiting_membership")
     looks_like_id = text.upper().startswith("EMYC") or "/" in text
 
     if is_awaiting or looks_like_id:
         async with AsyncSessionLocal() as db:
             try:
+                # Bind / verify membership for this Telegram user
                 participant = await ParticipantService.register_or_bind_participant(
                     db=db,
                     telegram_user_id=user.id,
@@ -652,57 +725,26 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 context.user_data["awaiting_membership"] = False
 
-                success_msg = get_text(
-                    "membership_verified",
-                    lang,
-                    full_name=get_participant_display_name(update),
-                    membership_id=participant.membership_id,
-                )
-                try:
-                    await update.message.reply_text(
-                        success_msg,
-                        parse_mode=ParseMode.MARKDOWN,
-                    )
-                except Exception as e:
-                    plain = success_msg.replace("*", "").replace("_", "").replace("`", "")
-                    await update.message.reply_text(plain)
+                # If already fully registered (has full name and phone number):
+                if participant.full_name and participant.phone_number:
+                    context.user_data.pop("registration", None)
+                    context.user_data.pop("awaiting_membership", None)
+                    already_msg = get_text("reg_already_registered", lang, membership_id=participant.membership_id)
+                    from app.core.config import get_settings
+                    menu_kb = get_main_menu_keyboard(lang, is_admin=get_settings().is_admin(user.id))
+                    await update.message.reply_text(already_msg, reply_markup=menu_kb, parse_mode=ParseMode.MARKDOWN)
+                    return
 
-                # Check if there is an active competition to seamlessly guide the user
-                comp = await CompetitionService.get_active_competition(db)
-                if comp:
-                    sched_str = format_schedule_window(comp.opens_at, comp.closes_at)
-                    meta_str = format_meta_line(comp.duration_minutes, comp.question_count)
-                    exam_info_text = get_text(
-                        "exam_info",
-                        lang,
-                        title=comp.title,
-                        schedule=sched_str,
-                        details=meta_str,
-                        questions=comp.question_count,
-                        duration=comp.duration_minutes,
-                        opens_at=sched_str,
-                        closes_at=meta_str,
-                    )
-                    try:
-                        await update.message.reply_text(
-                            exam_info_text,
-                            reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
-                            parse_mode=ParseMode.MARKDOWN,
-                        )
-                    except Exception as e:
-                        plain = exam_info_text.replace("*", "").replace("_", "").replace("`", "")
-                        await update.message.reply_text(
-                            plain,
-                            reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
-                        )
-                else:
-                    welcome_t = get_text("welcome", lang, name=get_participant_display_name(update))
-                    kb = get_main_menu_keyboard(lang)
-                    try:
-                        await update.message.reply_text(welcome_t, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                    except Exception:
-                        await update.message.reply_text(welcome_t.replace("*", "").replace("_", ""), reply_markup=kb)
+                # Not yet registered: start the registration flow!
+                context.user_data["registration"] = {
+                    "membership_id": participant.membership_id,
+                    "step": "full_name",
+                }
+
+                prompt_name = get_text("reg_membership_verified_prompt_name", lang, membership_id=participant.membership_id)
+                await update.message.reply_text(prompt_name, parse_mode=ParseMode.MARKDOWN)
                 return
+
             except InvalidMembershipFormatError:
                 err = get_text("membership_invalid_format", lang)
                 kb = get_membership_prompt_keyboard(lang)
@@ -730,6 +772,11 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except Exception:
                     await update.message.reply_text(err.replace("*", "").replace("_", ""), reply_markup=kb)
                 return
+            except Exception as e:
+                logger.error(f"Error during membership verification for user {user.id}: {e}", exc_info=True)
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                await update.message.reply_text("❌ Verification failed. Please check your ID and try again.", reply_markup=kb)
+                return
 
     # Case E: General fallback for messages from participants
     async with AsyncSessionLocal() as db:
@@ -751,6 +798,77 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(welcome_t, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
             except Exception:
                 await update.message.reply_text(welcome_t.replace("*", "").replace("_", ""), reply_markup=kb)
+
+
+async def handle_contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles native Telegram contact sharing for participant registration."""
+    user = update.effective_user
+    if not user or not update.message or not update.message.contact:
+        return
+
+    lang = await get_user_lang(user.id)
+    reg_data = context.user_data.get("registration")
+
+    # If user sends contact but is not in registration, or not at phone step
+    if not reg_data or reg_data.get("step") != "phone":
+        return
+
+    contact = update.message.contact
+
+    # 1. Verify contact belongs to the current Telegram user
+    if contact.user_id != user.id:
+        reject_msg = get_text("reg_phone_rejected_not_owner", lang)
+        await update.message.reply_text(
+            reject_msg,
+            reply_markup=get_share_phone_keyboard(lang),
+        )
+        return
+
+    # 2. Extract and normalize phone number
+    raw_phone = contact.phone_number.strip()
+    import re
+    clean_phone = re.sub(r"[^\d+]", "", raw_phone)
+    if not clean_phone.startswith("+") and clean_phone.isdigit():
+        clean_phone = f"+{clean_phone}"
+
+    membership_id = reg_data["membership_id"]
+    full_name = reg_data.get("full_name") or get_participant_display_name(update)
+    telegram_username = reg_data.get("telegram_username") or (f"@{user.username.lstrip('@')}" if user.username else None)
+
+    # 3. Single atomic database transaction to persist/update participant
+    try:
+        async with AsyncSessionLocal() as db:
+            participant = await ParticipantService.register_or_bind_participant(
+                db=db,
+                telegram_user_id=user.id,
+                membership_id=membership_id,
+                telegram_username=telegram_username,
+                language_code=lang,
+                full_name=full_name,
+                phone_number=clean_phone,
+            )
+
+        # 4. Clear registration state
+        context.user_data.pop("registration", None)
+        context.user_data.pop("awaiting_membership", None)
+
+        # 5. Dismiss reply keyboard and confirm registration
+        from app.core.config import get_settings
+        is_admin = get_settings().is_admin(user.id)
+        complete_text = get_text("reg_complete", lang)
+        await update.message.reply_text(complete_text, reply_markup=ReplyKeyboardRemove())
+
+        # 6. Render minimal participant main menu
+        welcome_text = get_text("welcome", lang, name=full_name)
+        menu_keyboard = get_main_menu_keyboard(lang, is_admin=is_admin)
+        await update.message.reply_text(welcome_text, reply_markup=menu_keyboard, parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logger.error(f"Failed to persist participant registration for user {user.id}: {e}", exc_info=True)
+        await update.message.reply_text(
+            "⚠️ A temporary database error occurred while completing registration. Please tap /start to try again.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
 
 
 async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

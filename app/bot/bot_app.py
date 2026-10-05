@@ -25,6 +25,7 @@ from app.bot.handlers.participant import (
     cb_participant_my_result,
     cb_participant_answer_review,
     handle_text_message,
+    handle_contact_message,
 )
 from app.bot.handlers.admin import (
     cmd_admin,
@@ -139,8 +140,11 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_announce, pattern="^admin:announce$"))
     app.add_handler(CallbackQueryHandler(cb_admin_announce_confirm, pattern="^admin:announce_confirm$"))
 
-    # Text message handler (e.g. membership ID submission)
+    # Text message handler (e.g. membership ID & full name submission)
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
+
+    # Native contact message handler (participant phone sharing)
+    app.add_handler(MessageHandler(filters.CONTACT, handle_contact_message))
 
     # Error handling
     app.add_error_handler(error_handler)

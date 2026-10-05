@@ -42,6 +42,18 @@ MESSAGES = {
         "🆔 *ID:* `{membership_id}`\n\n"
         "Your account is linked successfully. Proceeding to competition details..."
     ),
+    "reg_membership_verified_prompt_name": (
+        "✅ *Membership Verified!*\n"
+        "🆔 `{membership_id}`\n\n"
+        "Membership verified ✓\n\n"
+        "Please enter your full name:"
+    ),
+    "reg_enter_name_invalid": "⚠️ Please enter a valid full name (at least 2 characters, without commands):",
+    "reg_share_phone_prompt": "Please share your phone number to complete registration.",
+    "reg_share_phone_btn": "📱 Share Phone Number",
+    "reg_phone_rejected_not_owner": "⚠️ Please share your own phone number using the button below.",
+    "reg_complete": "✅ Registration complete.\n\nWelcome to EMYC Competition.",
+    "reg_already_registered": "✅ You are already registered with EMYC Membership `{membership_id}`.",
     "competition_not_open": "⏳ *The competition is not open yet.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 This competition has closed.",
     "start_exam_btn": "▶️ Start Competition",

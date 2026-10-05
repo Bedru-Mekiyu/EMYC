@@ -42,6 +42,18 @@ MESSAGES = {
         "🆔 *رقم العضوية:* `{membership_id}`\n\n"
         "تم ربط حسابك بنجاح. جارٍ الانتقال إلى تفاصيل المسابقة..."
     ),
+    "reg_membership_verified_prompt_name": (
+        "✅ *تم التحقق من العضوية!*\n"
+        "🆔 `{membership_id}`\n\n"
+        "تم التحقق من العضوية ✓\n\n"
+        "يرجى إدخال اسمك الكامل:"
+    ),
+    "reg_enter_name_invalid": "⚠️ يرجى إدخال اسم كامل صحيح (حرفين على الأقل):",
+    "reg_share_phone_prompt": "يرجى مشاركة رقم هاتفك لإتمام التسجيل.",
+    "reg_share_phone_btn": "📱 مشاركة رقم الهاتف",
+    "reg_phone_rejected_not_owner": "⚠️ يرجى مشاركة رقم هاتفك الخاص باستخدام الزر أدناه.",
+    "reg_complete": "✅ تم التسجيل بنجاح.\n\nمرحباً بكم في مسابقة EMYC.",
+    "reg_already_registered": "✅ أنت مسجل بالفعل برقم عضوية EMYC `{membership_id}`.",
     "competition_not_open": "⏳ *المسابقة ليست مفتوحة حالياً.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 هذه المسابقة مغلقة الآن.",
     "start_exam_btn": "▶️ بدء المسابقة",

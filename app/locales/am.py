@@ -42,6 +42,18 @@ MESSAGES = {
         "🆔 *መታወቂያ:* `{membership_id}`\n\n"
         "መለያዎ በተሳካ ሁኔታ ተገናኝቷል። ወደ ውድድሩ ዝርዝር በመሸጋገር ላይ..."
     ),
+    "reg_membership_verified_prompt_name": (
+        "✅ *አባልነትዎ ተረጋግጧል!*\n"
+        "🆔 `{membership_id}`\n\n"
+        "አባልነትዎ ተረጋግጧል ✓\n\n"
+        "እባክዎ ሙሉ ስምዎን ያስገቡ:"
+    ),
+    "reg_enter_name_invalid": "⚠️ እባክዎ ትክክለኛ ሙሉ ስም ያስገቡ (ቢያንስ 2 ፊደላት):",
+    "reg_share_phone_prompt": "ምዝገባውን ለማጠናቀቅ እባክዎ የስልክ ቁጥርዎን ያጋሩ።",
+    "reg_share_phone_btn": "📱 ስልክ ቁጥር አጋራ",
+    "reg_phone_rejected_not_owner": "⚠️ እባክዎ ከታች ያለውን ቁልፍ በመጫን የራስዎን ስልክ ቁጥር ያጋሩ።",
+    "reg_complete": "✅ ምዝገባዎ ተጠናቋል።\n\nእንኳን ወደ ኢ.ሙ.ወ.ም የውድድር መድረክ በደህና መጡ።",
+    "reg_already_registered": "✅ በኢ.ሙ.ወ.ም አባልነት መታወቂያ `{membership_id}` አስቀድመው ተመዝግበዋል።",
     "competition_not_open": "⏳ *ውድድሩ ገና አልተከፈተም።*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 ይህ ውድድር ተዘግቷል።",
     "start_exam_btn": "▶️ ውድድሩን ጀምር",

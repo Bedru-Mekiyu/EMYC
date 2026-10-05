@@ -158,15 +158,13 @@ class ParticipantService:
         return participant
 
     @staticmethod
-    async def register_or_bind_participant(
+    async def verify_membership_id(
         db: AsyncSession,
         telegram_user_id: int,
         membership_id: str,
-        telegram_username: Optional[str] = None,
-        language_code: str = "en",
         verifier: Optional[MembershipVerificationService] = None,
-    ) -> Participant:
-        """Verifies membership and binds it strictly 1-to-1 to a Telegram account."""
+    ) -> str:
+        """Verifies membership format and external validity, ensuring no account binding conflicts."""
         # 1. Format validation
         cleaned_membership = ParticipantService.validate_format(membership_id)
 
@@ -185,13 +183,10 @@ class ParticipantService:
         res_tg = await db.execute(tg_stmt)
         existing_tg_user = res_tg.scalar_one_or_none()
 
-        if existing_tg_user:
-            if existing_tg_user.membership_id != cleaned_membership:
-                raise TelegramAccountAlreadyBoundError(
-                    "This Telegram account is already linked to a verified EMYC membership."
-                )
-            # Already bound to the same membership ID - idempotent return
-            return existing_tg_user
+        if existing_tg_user and existing_tg_user.membership_id != cleaned_membership:
+            raise TelegramAccountAlreadyBoundError(
+                "This Telegram account is already linked to a verified EMYC membership."
+            )
 
         # 4. External membership verification
         verifier = verifier or get_membership_service()
@@ -199,12 +194,56 @@ class ParticipantService:
         if not is_valid:
             raise MembershipNotFoundError("Membership ID could not be verified in the registry")
 
-        # 5. Persist participant binding
+        return cleaned_membership
+
+    @staticmethod
+    async def register_or_bind_participant(
+        db: AsyncSession,
+        telegram_user_id: int,
+        membership_id: str,
+        telegram_username: Optional[str] = None,
+        language_code: str = "en",
+        verifier: Optional[MembershipVerificationService] = None,
+        full_name: Optional[str] = None,
+        phone_number: Optional[str] = None,
+    ) -> Participant:
+        """Verifies membership and binds/persists participant in a single database transaction."""
+        cleaned_membership = await ParticipantService.verify_membership_id(
+            db=db,
+            telegram_user_id=telegram_user_id,
+            membership_id=membership_id,
+            verifier=verifier,
+        )
+
+        tg_stmt = select(Participant).where(Participant.telegram_user_id == telegram_user_id)
+        res_tg = await db.execute(tg_stmt)
+        existing_tg_user = res_tg.scalar_one_or_none()
+
+        if existing_tg_user:
+            # Already bound to the same membership ID - update profile fields if provided
+            updated = False
+            if full_name and existing_tg_user.full_name != full_name:
+                existing_tg_user.full_name = full_name
+                updated = True
+            if phone_number and existing_tg_user.phone_number != phone_number:
+                existing_tg_user.phone_number = phone_number
+                updated = True
+            if telegram_username and existing_tg_user.telegram_username != telegram_username:
+                existing_tg_user.telegram_username = telegram_username
+                updated = True
+            if updated:
+                await db.commit()
+                await db.refresh(existing_tg_user)
+            return existing_tg_user
+
+        # Persist participant binding
         participant = Participant(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
             membership_id=cleaned_membership,
             language_code=language_code,
+            full_name=full_name,
+            phone_number=phone_number,
         )
         db.add(participant)
         try:
@@ -214,8 +253,12 @@ class ParticipantService:
             await db.rollback()
             raise MembershipAlreadyBoundError(f"Binding rejected due to constraint violation: {e}")
 
+        # Mask sensitive phone number in audit log
+        masked_phone = f"...{phone_number[-4:]}" if phone_number and len(phone_number) >= 4 else None
         log_audit_event("MEMBERSHIP_BOUND", "PARTICIPANT", str(telegram_user_id), {
             "membership_id": cleaned_membership,
             "telegram_username": telegram_username,
+            "has_full_name": full_name is not None,
+            "phone_masked": masked_phone,
         })
         return participant

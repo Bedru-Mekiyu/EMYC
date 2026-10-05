@@ -21,6 +21,12 @@ class Participant(Base):
     telegram_username: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
     )
+    full_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    phone_number: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )
     # Strict 1-to-1 unique binding between Membership ID and Telegram account
     membership_id: Mapped[str] = mapped_column(
         String(100), unique=True, nullable=False, index=True

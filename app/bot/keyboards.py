@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Any
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from app.locales.translator import get_text
 
 
@@ -33,6 +33,15 @@ def get_membership_prompt_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def get_share_phone_keyboard(lang: str = "en") -> ReplyKeyboardMarkup:
+    """Provides native contact sharing button for participant registration."""
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(get_text("reg_share_phone_btn", lang), request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
