@@ -174,4 +174,32 @@ MESSAGES = {
     "results_pending_notice": "⏳ *Results Pending*\n\nYour exam has been submitted successfully. The official results and rankings have not been published yet. Please check back once the administration publishes the final results!",
     "btn_prev": "◀️ Prev",
     "btn_next": "Next ▶️",
+    "admin_competition_control": (
+        "🏆 *Competition Control*\n\n"
+        "*{title}*\n\n"
+        "• *Status:* {status}\n"
+        "• *Schedule:* {schedule}\n"
+        "• *Format:* {format}{exam_session}\n\n"
+        "👥 *Registered:* {registered}\n"
+        "▶️ *Started:* {started}\n"
+        "⏳ *In Progress:* {in_progress}\n"
+        "✅ *Completed:* {completed}\n"
+        "⌛ *Expired:* {expired}\n"
+        "📈 *Completion Rate:* {rate}%\n"
+        "🏅 *Top Score:* {top_score}"
+    ),
+    "admin_no_questions_err": (
+        "⚠️ *Cannot start competition: No questions configured.*\n\n"
+        "Please import questions before launching the live examination session."
+    ),
+    "comp_scheduled_info": (
+        "🏆 *EMYC Competition*\n"
+        "*{title}*\n\n"
+        "{schedule}\n"
+        "{details}\n\n"
+        "✅ *You are eligible to participate.*\n\n"
+        "⏳ *The examination session has not started yet.*\n"
+        "The competition will open automatically at the scheduled time."
+    ),
+    "error_generic_retry": "⚠️ A temporary issue occurred while processing your request. Please try again from the menu.",
 }

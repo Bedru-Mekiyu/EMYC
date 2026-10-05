@@ -173,4 +173,32 @@ MESSAGES = {
     "results_pending_notice": "⏳ *Bu'aan Eeggamaa Jira*\n\nQormaanni keessan milkaa'inaan galee jira. Bu'aan ifaa fi sadarkaan ammatti hin labsamin jira. Yeroo bulchiinsi bu'aa xumuraa labsu mee deebi'aa ilaalaa!",
     "btn_prev": "◀️ Duraa",
     "btn_next": "Itti Aanu ▶️",
+    "admin_competition_control": (
+        "🏆 *Bulchiinsa Dorgommii*\n\n"
+        "*{title}*\n\n"
+        "• *Haala:* {status}\n"
+        "• *Sagantaa:* {schedule}\n"
+        "• *Bocama:* {format}{exam_session}\n\n"
+        "👥 *Galmaa'an:* {registered}\n"
+        "▶️ *Jalqaban:* {started}\n"
+        "⏳ *Adeemsa Irra:* {in_progress}\n"
+        "✅ *Xumuran:* {completed}\n"
+        "⌛ *Yeroon Kan Dhumate:* {expired}\n"
+        "📈 *Reeshoo Xumuraa:* {rate}%\n"
+        "🏅 *Qabxii Olaanaa:* {top_score}"
+    ),
+    "admin_no_questions_err": (
+        "⚠️ *Dorgommii jalqabsiisuun hin danda'amu: Gaaffileen hin qophoofne.*\n\n"
+        "Mee qormaata kallattii jalqabsiisuun dura gaaffilee galchaa."
+    ),
+    "comp_scheduled_info": (
+        "🏆 *Dorgommii EMYC*\n"
+        "*{title}*\n\n"
+        "{schedule}\n"
+        "{details}\n\n"
+        "✅ *Dorgommii kana keessatti hirmaachuuf ulaagaa guuttaniittu.*\n\n"
+        "⏳ *Yeroon qormaataa ammayyuu hin jalqabamne.*\n"
+        "Dorgommiin yeroo saganteeffametti ofumaan banaama."
+    ),
+    "error_generic_retry": "⚠️ Gaaffii keessan raawwachuu keessatti hanqinni yeroo muraasaa uumameera. Mee irra deebi'aa yaalaa.",
 }

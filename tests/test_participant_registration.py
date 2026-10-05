@@ -211,9 +211,9 @@ async def test_third_party_contact_rejected_and_own_contact_accepted(db_session:
     assert "Registration complete" in call1[0][0]
     assert isinstance(call1[1].get("reply_markup"), ReplyKeyboardRemove)
 
-    # Second message: Welcome message + Minimal main menu keyboard (2 buttons)
+    # Second message: Direct transition to competition state
     call2 = msg_legit.reply_text.call_args_list[1]
-    assert "Welcome" in call2[0][0]
+    assert "competition" in call2[0][0].lower()
     kb = call2[1].get("reply_markup")
     assert kb is not None
     buttons = [b.text for row in kb.inline_keyboard for b in row]

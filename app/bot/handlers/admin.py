@@ -270,6 +270,33 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             comp.question_count = existing_q_count
             await db.commit()
 
+        # Database-level aggregate metrics for this competition (excluding administrators)
+        total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
+
+        admin_ids = get_settings().admin_ids
+        admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
+
+        agg_stmt = select(
+            func.count(ExamAttempt.id).label("started"),
+            func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("completed"),
+            func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))).label("in_progress"),
+            func.count(case((ExamAttempt.status == AttemptStatus.EXPIRED, 1))).label("expired"),
+            func.max(ExamAttempt.score).label("highest_score"),
+        ).where(ExamAttempt.competition_id == comp.id)
+
+        if admin_p_sub is not None:
+            agg_stmt = agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+        agg_res = (await db.execute(agg_stmt)).one()
+        started = agg_res.started or 0
+        submitted = agg_res.completed or 0
+        in_progress = agg_res.in_progress or 0
+        expired = agg_res.expired or 0
+        highest_score = agg_res.highest_score
+
+        completion_pct = round((submitted / started) * 100, 1) if started > 0 else 0.0
+        top_score_val = f"{highest_score}/{existing_q_count}" if highest_score is not None else "N/A"
+
         # Simplified state-aware buttons (questions managed in Supabase, auto-attached when starting LIVE)
         if comp.status == CompetitionStatus.DRAFT:
             if existing_q_count == 0 and comp.question_count == 0:
@@ -294,19 +321,23 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
         elif comp.status == CompetitionStatus.LIVE:
             buttons.append([InlineKeyboardButton("✏️ Extend / Edit Open Window", callback_data=f"admin:edit_sched:{comp.id}")])
             buttons.append([InlineKeyboardButton("⏹ Close Competition", callback_data=f"admin:set_closed:{comp.id}")])
+            buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
 
         elif comp.status == CompetitionStatus.CLOSED:
             buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])
+            buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.RESULTS_FINALIZED:
             buttons.append([InlineKeyboardButton("📢 Publish Results to Participants", callback_data=f"admin:publish:{comp.id}")])
+            buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+            buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
             buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
             if comp.status == CompetitionStatus.PUBLISHED:
@@ -323,12 +354,21 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
         if comp.actual_exam_started_at and comp.actual_exam_ends_at:
             exam_session_str = f"\n• *Live Exam Session:* {format_schedule_window(comp.actual_exam_started_at, comp.actual_exam_ends_at)}"
 
-        text = (
-            f"🏆 *Competition Control*\n\n"
-            f"*{safe_title}*\n\n"
-            f"• *Status:* {status_label}\n"
-            f"• *Schedule:* {sched_str}\n"
-            f"• *Format:* {meta_str}{exam_session_str}\n"
+        text = get_text(
+            "admin_competition_control",
+            lang,
+            title=safe_title,
+            status=status_label,
+            schedule=sched_str,
+            format=meta_str,
+            exam_session=exam_session_str,
+            registered=total_p,
+            started=started,
+            in_progress=in_progress,
+            completed=submitted,
+            expired=expired,
+            rate=completion_pct,
+            top_score=top_score_val,
         )
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
 
@@ -570,10 +610,7 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
                 return
 
             if existing_count == 0 and (target_comp.question_count or 0) == 0:
-                err_msg = (
-                    "⚠️ *Cannot start competition: No questions found in database.*\n\n"
-                    "Please insert your questions into Supabase (`competition_questions` table) first, then tap Start Competition."
-                )
+                err_msg = get_text("admin_no_questions_err", lang)
                 kb = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔄 Refresh", callback_data="admin:competition")],
                     [InlineKeyboardButton("◀️ Admin Menu", callback_data="admin:home")],
@@ -627,8 +664,9 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
             ])
             await query.edit_message_text(err_msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
         except CompetitionError as e:
+            logger.warning(f"CompetitionError in cb_admin_set_status: {e}")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]])
-            await query.edit_message_text(f"❌ Error: {str(e)}", reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text("⚠️ A temporary error occurred while updating competition status.", reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
 
 @require_admin
@@ -724,8 +762,9 @@ async def cb_admin_finalize(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 parse_mode=ParseMode.MARKDOWN,
             )
         except CompetitionError as e:
+            logger.warning(f"CompetitionError in cb_admin_finalize: {e}")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]])
-            await query.edit_message_text(f"❌ Finalization error: {str(e)}", reply_markup=kb)
+            await query.edit_message_text("⚠️ An error occurred while finalizing scores. Please try again.", reply_markup=kb)
 
 
 @require_admin
@@ -804,8 +843,9 @@ async def cb_admin_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 parse_mode=ParseMode.MARKDOWN,
             )
         except CompetitionError as e:
+            logger.warning(f"CompetitionError in cb_admin_publish: {e}")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]])
-            await query.edit_message_text(f"❌ Publication error: {str(e)}", reply_markup=kb)
+            await query.edit_message_text("⚠️ An error occurred while publishing results. Please try again.", reply_markup=kb)
 
 
 @require_admin
@@ -1484,5 +1524,6 @@ async def cb_admin_archive(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 parse_mode=ParseMode.MARKDOWN,
             )
         except CompetitionError as e:
-            await query.edit_message_text(f"❌ Error archiving competition: {str(e)}", reply_markup=get_admin_keyboard("en"))
+            logger.warning(f"CompetitionError in cb_admin_archive: {e}")
+            await query.edit_message_text("⚠️ An error occurred while archiving the competition.", reply_markup=get_admin_keyboard("en"))
 

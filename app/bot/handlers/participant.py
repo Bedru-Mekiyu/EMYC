@@ -17,6 +17,7 @@ from app.models.attempt import (
 )
 from app.models.competition import Competition, CompetitionStatus
 from app.models.question import CompetitionQuestion
+from app.models.participant import Participant
 from app.services.membership_service import (
     ParticipantService,
     InvalidMembershipFormatError,
@@ -209,6 +210,188 @@ async def cb_select_language(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(menu_text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 
+async def _send_or_edit(
+    target: Any,
+    text: str,
+    reply_markup: Optional[Any] = None,
+    parse_mode: Optional[str] = ParseMode.MARKDOWN,
+) -> None:
+    """Helper to cleanly edit an existing message or reply with a new message."""
+    if hasattr(target, "edit_message_text"):
+        try:
+            await target.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception:
+            plain = text.replace("*", "").replace("_", "").replace("`", "")
+            try:
+                await target.edit_message_text(plain, reply_markup=reply_markup)
+            except Exception as e:
+                logger.warning(f"Failed to edit message in _send_or_edit: {e}")
+    elif hasattr(target, "reply_text"):
+        try:
+            await target.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception:
+            plain = text.replace("*", "").replace("_", "").replace("`", "")
+            try:
+                await target.reply_text(plain, reply_markup=reply_markup)
+            except Exception as e:
+                logger.warning(f"Failed to send reply in _send_or_edit: {e}")
+
+
+async def render_competition_state_for_participant(
+    target: Any,
+    participant: Participant,
+    user: Any,
+    lang: str,
+    context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+) -> None:
+    """Renders the appropriate contextual competition view for a verified, registered participant.
+    
+    Cases handled contextually:
+    - Attempt in progress -> Resumes first unanswered question immediately
+    - Results published -> Shows score, rank, correct/incorrect, and Review Answers button
+    - Results pending -> Shows clean results pending notice
+    - LIVE competition -> Shows competition details and [Start/Continue Competition]
+    - Scheduled/Open competition -> Shows human-friendly schedule and details (no raw enums or UUIDs)
+    - Closed competition -> Shows competition closed notice
+    """
+    async with AsyncSessionLocal() as db:
+        # Check active competition (LIVE or OPEN)
+        comp = await CompetitionService.get_active_competition(db)
+        if not comp:
+            # Check if participant has an attempt for the latest completed/published competition
+            latest_attempt_stmt = (
+                select(ExamAttempt, Competition)
+                .join(Competition, ExamAttempt.competition_id == Competition.id)
+                .where(ExamAttempt.participant_id == participant.id)
+                .order_by(ExamAttempt.started_at.desc())
+                .limit(1)
+            )
+            latest_res = await db.execute(latest_attempt_stmt)
+            latest_row = latest_res.first()
+
+            if latest_row:
+                prev_attempt, prev_comp = latest_row
+                name = participant.full_name or (user.first_name if user else "Participant")
+                if prev_comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+                    await render_participant_result_screen(target, prev_comp.id, participant.id, lang, name)
+                    return
+                elif prev_attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]:
+                    text = get_text("results_pending_notice", lang)
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                    await _send_or_edit(target, text, reply_markup=kb)
+                    return
+
+            from app.core.config import get_settings
+            if user and get_settings().is_admin(user.id):
+                admin_hint = (
+                    "⏳ *No competition is currently LIVE.*\n\n"
+                    "👑 As an administrator, you can configure and open the competition via the Admin Dashboard."
+                )
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")],
+                    [InlineKeyboardButton("🔙 Main Menu", callback_data="menu:home")],
+                ])
+                await _send_or_edit(target, admin_hint, reply_markup=kb)
+                return
+
+            latest_comp = await CompetitionService.get_open_or_scheduled_competition(db)
+            if not latest_comp:
+                latest_comp = (await db.execute(select(Competition).order_by(Competition.created_at.desc()).limit(1))).scalar_one_or_none()
+
+            if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
+                sched = format_schedule_window(latest_comp.opens_at, latest_comp.closes_at)
+                meta = format_meta_line(latest_comp.duration_minutes, latest_comp.question_count)
+                safe_title = latest_comp.title.replace("*", "").replace("_", " ").replace("`", "")
+                text = (
+                    f"🏆 *EMYC Competition*\n"
+                    f"*{safe_title}*\n\n"
+                    f"{sched}\n"
+                    f"{meta}\n\n"
+                    f"✅ *You are eligible to participate.*\n\n"
+                    f"⏳ *The examination session has not started yet.*\n"
+                    f"The competition will open automatically at the scheduled time."
+                )
+            elif latest_comp and latest_comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+                text = get_text("competition_closed", lang)
+            else:
+                text = get_text("competition_not_open", lang, title="EMYC Competition", schedule="Schedule TBA", details="", opens_at="Soon", closes_at="TBA")
+            await _send_or_edit(target, text, reply_markup=get_main_menu_keyboard(lang))
+            return
+
+        # Check existing attempt for this competition
+        stmt = (
+            select(ExamAttempt)
+            .where(
+                and_(
+                    ExamAttempt.competition_id == comp.id,
+                    ExamAttempt.participant_id == participant.id,
+                )
+            )
+            .order_by(ExamAttempt.started_at.desc())
+            .limit(1)
+        )
+        attempt = (await db.execute(stmt)).scalars().first()
+
+        if attempt:
+            # If in progress, check deadline and resume where they left off (first unanswered question)
+            if attempt.status == AttemptStatus.IN_PROGRESS:
+                if now_utc() > ensure_utc(attempt.deadline_at):
+                    await CompetitionService.auto_submit_expired_attempt(db, attempt)
+                    text = get_text("time_up_auto_submit", lang)
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                    await _send_or_edit(target, text, reply_markup=kb)
+                    return
+                ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
+                ans_ids = set((await db.execute(ans_stmt)).scalars().all())
+
+                order_stmt = (
+                    select(AttemptQuestionOrder.display_order)
+                    .where(
+                        and_(
+                            AttemptQuestionOrder.attempt_id == attempt.id,
+                            ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
+                        )
+                    )
+                    .order_by(AttemptQuestionOrder.display_order.asc())
+                    .limit(1)
+                )
+                first_unanswered = (await db.execute(order_stmt)).scalar() or 1
+                await render_question_screen(target, attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
+                return
+
+            # If already submitted / finished:
+            name = participant.full_name or (user.first_name if user else "Participant")
+            if comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
+                await render_participant_result_screen(target, comp.id, participant.id, lang, name)
+                return
+            else:
+                # Results pending
+                text = get_text("results_pending_notice", lang)
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
+                await _send_or_edit(target, text, reply_markup=kb)
+                return
+
+        # No attempt yet -> Show competition summary and Start Competition button
+        sched_str = format_schedule_window(comp.opens_at, comp.closes_at)
+        meta_str = format_meta_line(comp.duration_minutes, comp.question_count)
+        exam_info_text = get_text(
+            "exam_info",
+            lang,
+            title=comp.title,
+            schedule=sched_str,
+            details=meta_str,
+            questions=comp.question_count,
+            duration=comp.duration_minutes,
+            opens_at=sched_str,
+            closes_at=meta_str,
+        )
+        await _send_or_edit(
+            target,
+            exam_info_text,
+            reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
+        )
+
+
 async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles 'Start Competition' button from main menu. Guides registration or active exam."""
     query = update.callback_query
@@ -245,147 +428,18 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 )
                 return
 
-            # 2. Registered -> Check active competition
-            comp = await CompetitionService.get_active_competition(db)
-            if not comp:
-                # Check if participant has an attempt for the latest completed/published competition
-                latest_attempt_stmt = (
-                    select(ExamAttempt, Competition)
-                    .join(Competition, ExamAttempt.competition_id == Competition.id)
-                    .where(ExamAttempt.participant_id == participant.id)
-                    .order_by(ExamAttempt.started_at.desc())
-                    .limit(1)
-                )
-                latest_res = await db.execute(latest_attempt_stmt)
-                latest_row = latest_res.first()
-
-                if latest_row:
-                    prev_attempt, prev_comp = latest_row
-                    name = get_participant_display_name(update)
-                    if prev_comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
-                        await render_participant_result_screen(query, prev_comp.id, participant.id, lang, name)
-                        return
-
-                    elif prev_attempt.status in [AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED]:
-                        text = get_text("results_pending_notice", lang)
-                        kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-                        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                        return
-
-                from app.core.config import get_settings
-                if get_settings().is_admin(user.id):
-                    admin_hint = (
-                        "⏳ *No competition is currently LIVE.*\n\n"
-                        "👑 As an administrator, you can configure and open the competition via the Admin Dashboard."
-                    )
-                    kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")],
-                        [InlineKeyboardButton("🔙 Main Menu", callback_data="menu:home")],
-                    ])
-                    await query.edit_message_text(admin_hint, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                    return
-
-                latest_comp = await CompetitionService.get_open_or_scheduled_competition(db)
-                if not latest_comp:
-                    latest_comp = (await db.execute(select(Competition).order_by(Competition.created_at.desc()).limit(1))).scalar_one_or_none()
-
-                if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
-                    sched = format_schedule_window(latest_comp.opens_at, latest_comp.closes_at)
-                    meta = format_meta_line(latest_comp.duration_minutes, latest_comp.question_count)
-                    safe_title = latest_comp.title.replace("*", "").replace("_", " ").replace("`", "")
-                    text = (
-                        f"🏆 *EMYC Competition*\n"
-                        f"*{safe_title}*\n\n"
-                        f"{sched}\n"
-                        f"{meta}\n\n"
-                        f"✅ *You are eligible to participate.*\n\n"
-                        f"⏳ *The examination session has not started yet.*\n"
-                        f"The administrator will launch the live exam on the scheduled date. Questions will unlock automatically when the examination begins."
-                    )
-                elif latest_comp and latest_comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
-                    text = get_text("competition_closed", lang)
-                else:
-                    text = get_text("competition_not_open", lang, title="EMYC Competition", schedule="Schedule TBA", details="", opens_at="Soon", closes_at="TBA")
-                await query.edit_message_text(text, reply_markup=get_main_menu_keyboard(lang), parse_mode=ParseMode.MARKDOWN)
-                return
-
-            # 3. Check existing attempt for this competition
-            stmt = (
-                select(ExamAttempt)
-                .where(
-                    and_(
-                        ExamAttempt.competition_id == comp.id,
-                        ExamAttempt.participant_id == participant.id,
-                    )
-                )
-                .order_by(ExamAttempt.started_at.desc())
-                .limit(1)
-            )
-            attempt = (await db.execute(stmt)).scalars().first()
-
-            if attempt:
-                # If in progress, check deadline and resume where they left off (first unanswered question)
-                if attempt.status == AttemptStatus.IN_PROGRESS:
-                    if now_utc() > ensure_utc(attempt.deadline_at):
-                        await CompetitionService.auto_submit_expired_attempt(db, attempt)
-                        text = get_text("time_up_auto_submit", lang)
-                        kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-                        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                        return
-                    ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
-                    ans_ids = set((await db.execute(ans_stmt)).scalars().all())
-
-                    order_stmt = (
-                        select(AttemptQuestionOrder.display_order)
-                        .where(
-                            and_(
-                                AttemptQuestionOrder.attempt_id == attempt.id,
-                                ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
-                            )
-                        )
-                        .order_by(AttemptQuestionOrder.display_order.asc())
-                        .limit(1)
-                    )
-                    first_unanswered = (await db.execute(order_stmt)).scalar() or 1
-                    await render_question_screen(query, attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
-                    return
-
-                # If already submitted / finished:
-                name = get_participant_display_name(update)
-                if comp.status in [CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
-                    await render_participant_result_screen(query, comp.id, participant.id, lang, name)
-                    return
-
-                else:
-                    # Results pending
-                    text = get_text("results_pending_notice", lang)
-                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-                    await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-                    return
-
-            # 4. No attempt yet -> Show competition summary and Start Competition button
-            sched_str = format_schedule_window(comp.opens_at, comp.closes_at)
-            meta_str = format_meta_line(comp.duration_minutes, comp.question_count)
-            exam_info_text = get_text(
-                "exam_info",
-                lang,
-                title=comp.title,
-                schedule=sched_str,
-                details=meta_str,
-                questions=comp.question_count,
-                duration=comp.duration_minutes,
-                opens_at=sched_str,
-                closes_at=meta_str,
-            )
-            await query.edit_message_text(
-                exam_info_text,
-                reply_markup=get_start_exam_keyboard(comp.id, lang=lang),
-                parse_mode=ParseMode.MARKDOWN,
-            )
+        # 2. Registered -> Contextually route into the competition state
+        await render_competition_state_for_participant(
+            target=query,
+            participant=participant,
+            user=user,
+            lang=lang,
+            context=context,
+        )
     except Exception as e:
         logger.error(f"Error in cb_start_flow for user {user.id}: {e}", exc_info=True)
         kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-        fallback_msg = "⚠️ An unexpected error occurred while processing your request. Please try again from the menu."
+        fallback_msg = get_text("error_generic_retry", lang)
         try:
             await query.edit_message_text(fallback_msg, reply_markup=kb)
         except Exception:
@@ -853,20 +907,22 @@ async def handle_contact_message(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.pop("awaiting_membership", None)
 
         # 5. Dismiss reply keyboard and confirm registration
-        from app.core.config import get_settings
-        is_admin = get_settings().is_admin(user.id)
         complete_text = get_text("reg_complete", lang)
         await update.message.reply_text(complete_text, reply_markup=ReplyKeyboardRemove())
 
-        # 6. Render minimal participant main menu
-        welcome_text = get_text("welcome", lang, name=full_name)
-        menu_keyboard = get_main_menu_keyboard(lang, is_admin=is_admin)
-        await update.message.reply_text(welcome_text, reply_markup=menu_keyboard, parse_mode=ParseMode.MARKDOWN)
+        # 6. Render contextual competition state directly
+        await render_competition_state_for_participant(
+            target=update.message,
+            participant=participant,
+            user=user,
+            lang=lang,
+            context=context,
+        )
 
     except Exception as e:
         logger.error(f"Failed to persist participant registration for user {user.id}: {e}", exc_info=True)
         await update.message.reply_text(
-            "⚠️ A temporary database error occurred while completing registration. Please tap /start to try again.",
+            "⚠️ A temporary connection issue occurred while completing registration. Please tap /start to try again.",
             reply_markup=ReplyKeyboardRemove(),
         )
 
@@ -924,10 +980,15 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
             await query.edit_message_text(get_text("already_submitted", lang), reply_markup=get_main_menu_keyboard(lang))
         except CompetitionNotOpenError as e:
-            await query.edit_message_text(f"⏳ {str(e)}", reply_markup=get_main_menu_keyboard(lang))
+            logger.info(f"Exam start attempted when competition not open: {e}")
+            await _send_or_edit(
+                query,
+                get_text("competition_not_open", lang, title="EMYC Competition", schedule="", details="", opens_at="Soon", closes_at=""),
+                reply_markup=get_main_menu_keyboard(lang),
+            )
         except Exception as e:
             logger.error(f"Error starting exam: {e}", exc_info=True)
-            await query.edit_message_text(f"❌ Error starting exam: {str(e)}", reply_markup=get_main_menu_keyboard(lang))
+            await _send_or_edit(query, get_text("error_generic_retry", lang), reply_markup=get_main_menu_keyboard(lang))
 
 
 async def render_question_screen(
@@ -944,22 +1005,24 @@ async def render_question_screen(
                 db, attempt_id, display_order, participant_id=participant_id
             )
         except AttemptExpiredError:
-            await query.edit_message_text(
+            await _send_or_edit(
+                query,
                 get_text("time_up_auto_submit", lang),
                 reply_markup=get_main_menu_keyboard(lang),
-                parse_mode=ParseMode.MARKDOWN,
             )
             return
         except UnauthorizedAttemptAccessError:
-            await query.edit_message_text(
+            await _send_or_edit(
+                query,
                 "❌ Unauthorized attempt access.",
                 reply_markup=get_main_menu_keyboard(lang),
             )
             return
         except Exception as e:
             logger.error(f"Failed to fetch question for attempt: {e}", exc_info=True)
-            await query.edit_message_text(
-                f"❌ Error fetching question: {str(e)}",
+            await _send_or_edit(
+                query,
+                get_text("error_generic_retry", lang),
                 reply_markup=get_main_menu_keyboard(lang),
             )
             return
@@ -997,27 +1060,7 @@ async def render_question_screen(
         lang=lang,
     )
 
-    try:
-        await query.edit_message_text(
-            msg_body,
-            reply_markup=keyboard,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to edit question with Markdown parse mode ({e}); retrying without Markdown formatting")
-        plain_body = msg_body.replace("*", "").replace("_", "").replace("`", "")
-        try:
-            await query.edit_message_text(
-                plain_body,
-                reply_markup=keyboard,
-            )
-        except Exception as e2:
-            logger.error(f"Failed to edit question screen: {e2}")
-            if query.message:
-                await query.message.reply_text(
-                    plain_body,
-                    reply_markup=keyboard,
-                )
+    await _send_or_edit(query, msg_body, reply_markup=keyboard)
 
 
 async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1441,8 +1484,9 @@ async def cb_participant_answer_review(update: Update, context: ContextTypes.DEF
             await query.edit_message_text(notice_text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
             return
         except CompetitionError as e:
+            logger.warning(f"CompetitionError in cb_participant_answer_review: {e}")
             kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
-            await query.edit_message_text(str(e), reply_markup=kb)
+            await query.edit_message_text(get_text("error_generic_retry", lang), reply_markup=kb)
             return
 
     # Build 1-question-at-a-time review presentation
