@@ -152,3 +152,14 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_error_handler(error_handler)
 
     return app
+
+
+if __name__ == "__main__":
+    import sys
+    print("=" * 70)
+    print(" Starting EMYC Telegram Competitive Examination Bot (Polling Mode)...")
+    print(" Press Ctrl+C in this terminal window to stop.")
+    print("=" * 70)
+    bot_app = build_application()
+    bot_app.run_polling(drop_pending_updates=True)
+
