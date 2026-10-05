@@ -208,9 +208,12 @@ class CompetitionService:
 
         # Pre-activation validation
         if new_status == CompetitionStatus.LIVE:
+            if comp.status == CompetitionStatus.LIVE:
+                raise CompetitionError("Examination session is already LIVE")
             # Authoritative server timestamps for the actual examination session:
-            comp.actual_exam_started_at = now
-            comp.actual_exam_ends_at = now + timedelta(minutes=comp.duration_minutes or 60)
+            if comp.actual_exam_started_at is None:
+                comp.actual_exam_started_at = now
+                comp.actual_exam_ends_at = now + timedelta(minutes=comp.duration_minutes or 60)
             # Ensure competition availability window encloses the exam session without shrinking it:
             if not comp.opens_at or comp.opens_at > now:
                 comp.opens_at = now
@@ -255,16 +258,56 @@ class CompetitionService:
         return comp
 
     @staticmethod
+    async def extend_live_exam_duration(
+        db: AsyncSession,
+        competition_id: uuid.UUID,
+        new_duration_minutes: int,
+    ) -> Competition:
+        """Atomically extends or updates the exam duration of a LIVE competition and synchronizes all active attempts."""
+        stmt = select(Competition).where(Competition.id == competition_id).with_for_update()
+        res = await db.execute(stmt)
+        comp = res.scalar_one_or_none()
+        if not comp:
+            raise CompetitionError("Competition not found")
+
+        comp.duration_minutes = new_duration_minutes
+        if comp.status == CompetitionStatus.LIVE and comp.actual_exam_started_at:
+            comp.actual_exam_ends_at = comp.actual_exam_started_at + timedelta(minutes=new_duration_minutes)
+            comp.closes_at = max(comp.closes_at, comp.actual_exam_ends_at)
+
+            # Synchronize ALL in-progress attempts to the single updated global deadline
+            await db.execute(
+                update(ExamAttempt)
+                .where(
+                    and_(
+                        ExamAttempt.competition_id == comp.id,
+                        ExamAttempt.status == AttemptStatus.IN_PROGRESS,
+                    )
+                )
+                .values(deadline_at=comp.actual_exam_ends_at)
+            )
+
+        await db.commit()
+        await db.refresh(comp)
+        return comp
+
+    @staticmethod
     async def check_and_auto_close_competitions(db: AsyncSession, now_override: Optional[datetime] = None) -> int:
         """Automatically transitions LIVE competitions to CLOSED when exam session deadline or closing time is reached."""
         now = now_override or now_utc()
         stmt = select(Competition).where(
-            and_(
-                Competition.status == CompetitionStatus.LIVE,
-                or_(
-                    and_(Competition.actual_exam_ends_at.is_not(None), Competition.actual_exam_ends_at <= now),
-                    and_(Competition.actual_exam_ends_at.is_(None), Competition.closes_at <= now),
-                )
+            or_(
+                and_(
+                    Competition.status == CompetitionStatus.LIVE,
+                    or_(
+                        and_(Competition.actual_exam_ends_at.is_not(None), Competition.actual_exam_ends_at <= now),
+                        and_(Competition.actual_exam_ends_at.is_(None), Competition.closes_at <= now),
+                    ),
+                ),
+                and_(
+                    Competition.status.in_([CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]),
+                    Competition.closes_at <= now,
+                ),
             )
         ).with_for_update(skip_locked=True)
         res = await db.execute(stmt)
@@ -308,7 +351,7 @@ class CompetitionService:
                     or_(
                         and_(Competition.actual_exam_started_at.is_not(None), Competition.actual_exam_started_at <= now, Competition.actual_exam_ends_at > now),
                         and_(Competition.actual_exam_started_at.is_(None), Competition.opens_at <= now, Competition.closes_at > now),
-                    )
+                    ),
                 )
             )
             .order_by(Competition.actual_exam_started_at.desc().nullslast(), Competition.opens_at.desc())
@@ -383,8 +426,7 @@ class CompetitionService:
         if comp.actual_exam_ends_at:
             deadline_at = ensure_utc(comp.actual_exam_ends_at)
         else:
-            normal_deadline = now + timedelta(minutes=comp.duration_minutes)
-            deadline_at = min(normal_deadline, comp_closes)
+            deadline_at = min(now + timedelta(minutes=comp.duration_minutes), comp_closes)
 
         attempt = ExamAttempt(
             competition_id=competition_id,

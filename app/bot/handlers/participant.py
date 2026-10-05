@@ -254,14 +254,15 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 if latest_comp and latest_comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
                     sched = format_schedule_window(latest_comp.opens_at, latest_comp.closes_at)
                     meta = format_meta_line(latest_comp.duration_minutes, latest_comp.question_count)
-                    text = get_text(
-                        "competition_not_open",
-                        lang,
-                        title=latest_comp.title,
-                        schedule=sched,
-                        details=meta,
-                        opens_at=sched,
-                        closes_at=meta,
+                    safe_title = latest_comp.title.replace("*", "").replace("_", " ").replace("`", "")
+                    text = (
+                        f"🏆 *EMYC Competition*\n"
+                        f"*{safe_title}*\n\n"
+                        f"{sched}\n"
+                        f"{meta}\n\n"
+                        f"✅ *You are eligible to participate.*\n\n"
+                        f"⏳ *The examination session has not started yet.*\n"
+                        f"The administrator will launch the live exam on the scheduled date. Questions will unlock automatically when the examination begins."
                     )
                 elif latest_comp and latest_comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.PUBLISHED, CompetitionStatus.ARCHIVED]:
                     text = get_text("competition_closed", lang)
@@ -491,9 +492,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     if comp:
                         comp.closes_at = comp.opens_at + td
                         if comp.status == CompetitionStatus.LIVE and comp.actual_exam_started_at:
-                            comp.actual_exam_ends_at = comp.actual_exam_started_at + td
-                            comp.closes_at = max(comp.closes_at, comp.actual_exam_ends_at)
-                        await db.commit()
+                            await CompetitionService.extend_live_exam_duration(db, comp.id, dur_minutes)
+                        else:
+                            await db.commit()
                 sched_label = format_timedelta_friendly(td)
                 await update.message.reply_text(
                     f"✅ *Schedule Updated!*\n\nCompetition schedule / duration is now set to *{sched_label}*.",

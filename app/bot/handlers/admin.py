@@ -59,6 +59,7 @@ def require_admin(handler_func):
 STATUS_DISPLAY_MAP = {
     CompetitionStatus.DRAFT: "📝 Draft",
     CompetitionStatus.SCHEDULED: "⏰ Scheduled",
+    CompetitionStatus.OPEN: "🟢 Open",
     CompetitionStatus.LIVE: "🟢 Live",
     CompetitionStatus.CLOSED: "🔴 Closed",
     CompetitionStatus.RESULTS_FINALIZED: "📊 Finalized",
@@ -274,7 +275,8 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             if existing_q_count == 0 and comp.question_count == 0:
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
             else:
-                buttons.append([InlineKeyboardButton("🟢 Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
+                buttons.append([InlineKeyboardButton("🚀 Open for Registration (Phase 1)", callback_data=f"admin:set_open:{comp.id}")])
+                buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
             buttons.append([InlineKeyboardButton("✏️ Edit Schedule Window", callback_data=f"admin:edit_sched:{comp.id}")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
             buttons.append([InlineKeyboardButton(get_text("admin_btn_create_comp", lang), callback_data="admin:create_comp:start")])
@@ -285,6 +287,8 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             else:
                 buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
             buttons.append([InlineKeyboardButton("✏️ Edit Schedule Window", callback_data=f"admin:edit_sched:{comp.id}")])
+            if comp.status == CompetitionStatus.OPEN:
+                buttons.append([InlineKeyboardButton("⏹ Close Competition", callback_data=f"admin:set_closed:{comp.id}")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.LIVE:
@@ -418,13 +422,14 @@ async def cb_admin_apply_schedule(update: Update, context: ContextTypes.DEFAULT_
 
         if td.total_seconds() >= 24 * 3600:
             comp.closes_at = comp.opens_at + td
+            await db.commit()
         else:
-            comp.duration_minutes = int(td.total_seconds() / 60)
+            new_dur = int(td.total_seconds() / 60)
             if comp.status == CompetitionStatus.LIVE and comp.actual_exam_started_at:
-                comp.actual_exam_ends_at = comp.actual_exam_started_at + td
-                comp.closes_at = max(comp.closes_at, comp.actual_exam_ends_at)
-
-        await db.commit()
+                await CompetitionService.extend_live_exam_duration(db, comp.id, new_dur)
+            else:
+                comp.duration_minutes = new_dur
+                await db.commit()
 
     await query.answer("Schedule updated successfully!", show_alert=False)
     await cb_admin_competition(update, context)
@@ -540,11 +545,16 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     user_id = user.id if user else 0
 
-    # format: admin:set_live:<id> or admin:set_closed:<id>
+    # format: admin:set_live:<id>, admin:set_open:<id>, or admin:set_closed:<id>
     parts = query.data.split(":")
-    action_type = parts[1]  # "set_live" or "set_closed"
+    action_type = parts[1]  # "set_live", "set_open", or "set_closed"
     comp_id = uuid.UUID(parts[2])
-    new_status = CompetitionStatus.LIVE if "live" in action_type else CompetitionStatus.CLOSED
+    if "open" in action_type:
+        new_status = CompetitionStatus.OPEN
+    elif "live" in action_type:
+        new_status = CompetitionStatus.LIVE
+    else:
+        new_status = CompetitionStatus.CLOSED
 
     async with AsyncSessionLocal() as db:
         p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
@@ -571,31 +581,33 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await query.edit_message_text(err_msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
                 return
 
-            if existing_count > 0:
-                target_comp.question_count = existing_count
-            now = datetime.now(timezone.utc)
-            # Live Synchronous Examination Session:
-            target_comp.actual_exam_started_at = now
-            target_comp.actual_exam_ends_at = now + timedelta(minutes=target_comp.duration_minutes)
-            if not target_comp.opens_at or target_comp.opens_at > now:
-                target_comp.opens_at = now
-            if not target_comp.closes_at or target_comp.closes_at < target_comp.actual_exam_ends_at:
-                target_comp.closes_at = target_comp.actual_exam_ends_at
-            await db.commit()
-
         try:
             comp = await CompetitionService.update_status(db, comp_id, new_status, admin_id=str(user_id))
-            status_emoji = "LIVE 🟢" if new_status == CompetitionStatus.LIVE else "CLOSED 🔴"
-            msg = (
-                f"✅ *Competition is now {status_emoji}!*\n\n"
-                f"*Title:* {comp.title}\n"
-                f"*Questions:* {comp.question_count}\n"
-                f"*Duration:* {comp.duration_minutes} minutes\n\n"
-            )
             if new_status == CompetitionStatus.LIVE:
-                msg += "🎉 The competition is officially open! Participants can now take the exam."
+                status_emoji = "LIVE 🟢"
+                msg = (
+                    f"✅ *Competition is now {status_emoji}!*\n\n"
+                    f"*Title:* {comp.title}\n"
+                    f"*Questions:* {comp.question_count}\n"
+                    f"*Duration:* {comp.duration_minutes} minutes\n\n"
+                    "🎉 The live examination session is officially active! Participants can now take the exam."
+                )
+            elif new_status == CompetitionStatus.OPEN:
+                status_emoji = "OPEN FOR REGISTRATION 🟢"
+                msg = (
+                    f"✅ *Competition is now {status_emoji}!*\n\n"
+                    f"*Title:* {comp.title}\n"
+                    f"*Schedule:* {format_schedule_window(comp.opens_at, comp.closes_at)}\n"
+                    f"*Exam Duration:* {comp.duration_minutes} minutes\n\n"
+                    "🎉 The competition is now open for participant registration, language selection, and eligibility verification! The actual examination session remains locked until you launch it on exam day."
+                )
             else:
-                msg += "The competition has closed. You can now finalize scores and rankings in Results."
+                status_emoji = "CLOSED 🔴"
+                msg = (
+                    f"✅ *Competition is now {status_emoji}!*\n\n"
+                    f"*Title:* {comp.title}\n\n"
+                    "The competition has closed. You can now finalize scores and rankings in Results."
+                )
 
             kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🏆 Manage Competition", callback_data="admin:competition")],
@@ -615,11 +627,8 @@ async def cb_admin_set_status(update: Update, context: ContextTypes.DEFAULT_TYPE
             ])
             await query.edit_message_text(err_msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
         except CompetitionError as e:
-            await query.edit_message_text(
-                f"❌ Error: {str(e)}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]]),
-                parse_mode=ParseMode.MARKDOWN,
-            )
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data="admin:competition")]])
+            await query.edit_message_text(f"❌ Error: {str(e)}", reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
 
 @require_admin

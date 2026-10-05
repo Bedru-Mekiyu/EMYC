@@ -271,6 +271,8 @@ async def test_synchronized_competition_deadline_and_late_joiner_clamp(db_sessio
     comp.opens_at = t0
     comp.closes_at = t0 + timedelta(minutes=duration)
     comp.status = CompetitionStatus.LIVE
+    comp.actual_exam_started_at = t0
+    comp.actual_exam_ends_at = t0 + timedelta(minutes=duration)
     await db_session.commit()
 
     # 2. Participant 1 starts right at t0
@@ -283,8 +285,8 @@ async def test_synchronized_competition_deadline_and_late_joiner_clamp(db_sessio
     # 3. Participant 2 joins 15 minutes late at t0 + 15m
     t_late = t0 + timedelta(minutes=15)
     attempt2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_late)
-    # Deadline must NOT be t_late + 60m; it MUST be strictly clamped to comp.closes_at = t0 + 60m!
-    assert attempt2.deadline_at == comp.closes_at
+    # Deadline must NOT be t_late + 60m; it MUST be strictly clamped to comp.actual_exam_ends_at = t0 + 60m!
+    assert attempt2.deadline_at == comp.actual_exam_ends_at
     time_left_p2 = (attempt2.deadline_at - t_late).total_seconds() / 60
     assert time_left_p2 == 45  # Exactly 45 minutes remaining!
 
@@ -408,5 +410,182 @@ async def test_two_phase_competition_lifecycle_availability_and_global_exam(db_s
     assert att1.status == AttemptStatus.EXPIRED
     assert att2.status == AttemptStatus.EXPIRED
     assert att3.status == AttemptStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_two_phase_availability_invariants_and_registration(db_session: AsyncSession):
+    """Verifies that Phase 1 (open for registration) strictly isolates exam access:
+    1. A 1-month competition in OPEN status has NO actual_exam timestamps.
+    2. Participants can register, bind membership, and become eligible during this period.
+    3. Any attempt to start the exam during OPEN status raises CompetitionNotOpenError.
+    4. Editing opens_at or closes_at does NOT set actual_exam timestamps.
+    5. Transitioning DRAFT -> OPEN does NOT set actual_exam timestamps.
+    """
+    from app.services.membership_service import ParticipantService
+
+    t_open = datetime(2026, 10, 1, 0, 0, 0, tzinfo=timezone.utc)
+    t_close = datetime(2026, 10, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+    # 1. Create DRAFT competition
+    comp = await CompetitionService.create_competition(
+        db=db_session,
+        title="National Physics League 2026",
+        description="One month availability window",
+        opens_at=t_open,
+        closes_at=t_close,
+        duration_minutes=90,
+        question_count=2,
+        status=CompetitionStatus.DRAFT,
+    )
+    assert comp.status == CompetitionStatus.DRAFT
+    assert comp.actual_exam_started_at is None
+    assert comp.actual_exam_ends_at is None
+
+    # Add questions
+    for idx in (1, 2):
+        q = CompetitionQuestion(
+            competition_id=comp.id,
+            question_text=f"Physics Question {idx}?",
+            options={"A": "Alpha", "B": "Beta", "C": "Gamma", "D": "Delta"},
+            correct_option="A",
+            order_index=idx,
+        )
+        db_session.add(q)
+    await db_session.commit()
+
+    # 2. Transition DRAFT -> OPEN (Phase 1 begins)
+    comp = await CompetitionService.update_status(db_session, comp.id, CompetitionStatus.OPEN)
+    assert comp.status == CompetitionStatus.OPEN
+    # Critical Invariant: Exam timer must NOT be running!
+    assert comp.actual_exam_started_at is None
+    assert comp.actual_exam_ends_at is None
+
+    # 3. Participant registers during Phase 1 (e.g. Oct 10)
+    p = await ParticipantService.register_or_bind_participant(
+        db=db_session,
+        telegram_user_id=778899,
+        membership_id="EMYC/778899/2026",
+        telegram_username="zubair",
+    )
+    assert p is not None
+    assert p.is_active is True
+
+    # 4. Attempting to start the exam during Phase 1 MUST fail
+    t_mid = datetime(2026, 10, 10, 15, 0, 0, tzinfo=timezone.utc)
+    with pytest.raises(CompetitionNotOpenError):
+        await CompetitionService.start_attempt(db_session, comp.id, p.id, now_override=t_mid)
+
+    # 5. Editing the availability window preserves null exam timestamps
+    comp.closes_at = comp.opens_at + timedelta(days=45)
+    await db_session.commit()
+    await db_session.refresh(comp)
+    assert comp.actual_exam_started_at is None
+    assert comp.actual_exam_ends_at is None
+
+
+@pytest.mark.asyncio
+async def test_live_exam_concurrency_and_idempotency(db_session: AsyncSession):
+    """Verifies that activating the live exam is strictly idempotent and concurrency-safe:
+    1. update_status(..., LIVE) transitions OPEN -> LIVE and sets authoritative timestamps.
+    2. Attempting to transition to LIVE a second time raises CompetitionError without modifying timestamps.
+    """
+    t_open = datetime(2026, 10, 1, 0, 0, 0, tzinfo=timezone.utc)
+    t_close = datetime(2026, 10, 31, 23, 59, 59, tzinfo=timezone.utc)
+
+    comp = await CompetitionService.create_competition(
+        db=db_session,
+        title="Olympiad Concurrency Test",
+        opens_at=t_open,
+        closes_at=t_close,
+        duration_minutes=60,
+        question_count=1,
+        status=CompetitionStatus.OPEN,
+    )
+    q = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Q1?",
+        options={"A": "1", "B": "2", "C": "3", "D": "4"},
+        correct_option="A",
+        order_index=1,
+    )
+    db_session.add(q)
+    await db_session.commit()
+
+    # 1. First admin activates exam
+    comp = await CompetitionService.update_status(db_session, comp.id, CompetitionStatus.LIVE)
+    assert comp.status == CompetitionStatus.LIVE
+    assert comp.actual_exam_started_at is not None
+    assert comp.actual_exam_ends_at is not None
+    orig_start = comp.actual_exam_started_at
+    orig_end = comp.actual_exam_ends_at
+
+    # 2. Second admin / concurrent request attempts to activate exam again
+    with pytest.raises(CompetitionError) as exc_info:
+        await CompetitionService.update_status(db_session, comp.id, CompetitionStatus.LIVE)
+    assert "already LIVE" in str(exc_info.value) or "Invalid transition" in str(exc_info.value)
+
+    # 3. Verify timestamps were not altered
+    await db_session.refresh(comp)
+    assert comp.actual_exam_started_at == orig_start
+    assert comp.actual_exam_ends_at == orig_end
+
+
+@pytest.mark.asyncio
+async def test_live_duration_extension_synchronizes_all_active_attempts(db_session: AsyncSession):
+    """Verifies that extending the exam duration while LIVE updates ONE authoritative global deadline
+    for both the competition and all active participant attempts in progress:
+    - Participant A starts before extension (gets original deadline).
+    - Admin extends duration by 30 minutes.
+    - Participant A's attempt deadline is automatically extended.
+    - Participant B joins after extension and receives the exact same global deadline.
+    - Zero divergent deadlines exist.
+    """
+    t0 = datetime(2026, 10, 31, 14, 0, 0, tzinfo=timezone.utc)
+    duration = 60  # Initial 60 min
+
+    comp = Competition(
+        title="Live Extension Exam",
+        status=CompetitionStatus.LIVE,
+        opens_at=t0 - timedelta(days=10),
+        closes_at=t0 + timedelta(days=1),
+        duration_minutes=duration,
+        actual_exam_started_at=t0,
+        actual_exam_ends_at=t0 + timedelta(minutes=duration),
+        question_count=1,
+    )
+    p1 = Participant(telegram_user_id=8801, membership_id="EMYC/8801/2026")
+    p2 = Participant(telegram_user_id=8802, membership_id="EMYC/8802/2026")
+    db_session.add_all([comp, p1, p2])
+    await db_session.flush()
+
+    q = CompetitionQuestion(
+        competition_id=comp.id,
+        question_text="Q1?",
+        options={"A": "1", "B": "2", "C": "3", "D": "4"},
+        correct_option="A",
+        order_index=1,
+    )
+    db_session.add(q)
+    await db_session.commit()
+
+    # 1. Participant A starts at t0: deadline is t0 + 60m
+    att1 = await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t0)
+    assert att1.deadline_at == t0 + timedelta(minutes=60)
+
+    # 2. Admin extends live exam duration to 90 minutes at t0 + 20m
+    updated_comp = await CompetitionService.extend_live_exam_duration(db_session, comp.id, new_duration_minutes=90)
+    assert updated_comp.duration_minutes == 90
+    assert updated_comp.actual_exam_ends_at == t0 + timedelta(minutes=90)
+
+    # Verify Participant A's existing in-progress attempt deadline was updated to t0 + 90m
+    await db_session.refresh(att1)
+    assert att1.deadline_at == t0 + timedelta(minutes=90)
+
+    # 3. Participant B starts late at t0 + 30m: receives the exact same global deadline (t0 + 90m)
+    t_p2 = t0 + timedelta(minutes=30)
+    att2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_p2)
+    assert att2.deadline_at == t0 + timedelta(minutes=90)
+    assert att2.deadline_at == att1.deadline_at  # Strictly identical global deadline!
+    assert (att2.deadline_at - t_p2).total_seconds() / 60 == 60  # Exactly 60 minutes remaining
 
 
