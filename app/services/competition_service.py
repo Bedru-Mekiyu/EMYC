@@ -207,6 +207,9 @@ class CompetitionService:
 
         # Pre-activation validation
         if new_status == CompetitionStatus.LIVE:
+            if not comp.opens_at or comp.opens_at > now or comp.closes_at <= now:
+                comp.opens_at = now
+                comp.closes_at = now + timedelta(minutes=comp.duration_minutes or 60)
             await CompetitionService.validate_competition_for_live(db, comp)
 
         # Handle manual early closure when transitioning from LIVE to CLOSED before closes_at
@@ -305,10 +308,13 @@ class CompetitionService:
 
     @staticmethod
     async def start_attempt(
-        db: AsyncSession, competition_id: uuid.UUID, participant_id: uuid.UUID
+        db: AsyncSession,
+        competition_id: uuid.UUID,
+        participant_id: uuid.UUID,
+        now_override: Optional[datetime] = None,
     ) -> ExamAttempt:
         """Starts an exam attempt for a participant, enforcing schedule, deadlines, and randomization."""
-        now = now_utc()
+        now = ensure_utc(now_override) if now_override else now_utc()
         comp = await db.get(Competition, competition_id)
         if not comp:
             raise CompetitionError("Competition not found")

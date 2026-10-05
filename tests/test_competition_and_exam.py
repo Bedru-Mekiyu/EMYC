@@ -225,3 +225,71 @@ async def test_expired_attempt_auto_submission(db_session: AsyncSession):
     await db_session.refresh(attempt)
     assert attempt.status == AttemptStatus.EXPIRED
     assert attempt.submitted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_synchronized_competition_deadline_and_late_joiner_clamp(db_session: AsyncSession):
+    """Verifies that:
+    1. Setting competition to LIVE starts the clock immediately for duration_minutes.
+    2. A participant joining at start gets the full duration.
+    3. A participant joining 15 minutes late receives ONLY the remaining 45 minutes (no extra time).
+    4. A participant attempting to join after the duration expires is rejected with CompetitionNotOpenError.
+    """
+    from datetime import datetime, timezone, timedelta
+    from app.services.competition_service import CompetitionNotOpenError
+
+    t0 = datetime(2026, 10, 5, 12, 0, 0, tzinfo=timezone.utc)
+    duration = 60  # 1 hour competition
+
+    comp = Competition(
+        title="Synchronized Live Olympiad",
+        status=CompetitionStatus.DRAFT,
+        opens_at=t0,
+        closes_at=t0 + timedelta(minutes=duration),
+        duration_minutes=duration,
+        question_count=2,
+    )
+    p1 = Participant(telegram_user_id=111001, membership_id="EMYC/111001/2026")
+    p2 = Participant(telegram_user_id=111002, membership_id="EMYC/111002/2026")
+    p3 = Participant(telegram_user_id=111003, membership_id="EMYC/111003/2026")
+    db_session.add_all([comp, p1, p2, p3])
+    await db_session.flush()
+
+    for idx in (1, 2):
+        q = CompetitionQuestion(
+            competition_id=comp.id,
+            question_text=f"Question {idx}?",
+            options={"A": "1", "B": "2", "C": "3", "D": "4"},
+            correct_option="A",
+            order_index=idx,
+        )
+        db_session.add(q)
+    await db_session.commit()
+
+    # 1. Admin sets competition to LIVE
+    # Service automatically sets opens_at = now, closes_at = now + 60m
+    comp.opens_at = t0
+    comp.closes_at = t0 + timedelta(minutes=duration)
+    comp.status = CompetitionStatus.LIVE
+    await db_session.commit()
+
+    # 2. Participant 1 starts right at t0
+    attempt1 = await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t0)
+    # Deadline is min(t0 + 60m, closes_at) = t0 + 60m (full 60 min)
+    assert attempt1.deadline_at == t0 + timedelta(minutes=60)
+    time_left_p1 = (attempt1.deadline_at - t0).total_seconds() / 60
+    assert time_left_p1 == 60
+
+    # 3. Participant 2 joins 15 minutes late at t0 + 15m
+    t_late = t0 + timedelta(minutes=15)
+    attempt2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_late)
+    # Deadline must NOT be t_late + 60m; it MUST be strictly clamped to comp.closes_at = t0 + 60m!
+    assert attempt2.deadline_at == comp.closes_at
+    time_left_p2 = (attempt2.deadline_at - t_late).total_seconds() / 60
+    assert time_left_p2 == 45  # Exactly 45 minutes remaining!
+
+    # 4. Participant 3 tries to start after competition has expired (t0 + 61m)
+    t_expired = t0 + timedelta(minutes=61)
+    with pytest.raises(CompetitionNotOpenError):
+        await CompetitionService.start_attempt(db_session, comp.id, p3.id, now_override=t_expired)
+

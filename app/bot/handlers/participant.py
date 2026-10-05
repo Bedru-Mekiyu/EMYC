@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -415,16 +415,21 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     dur_val = int(clean_val)
                     if 1 <= dur_val <= 1440:
                         wizard["duration"] = dur_val
-                        wizard["step"] = "schedule"
+                        now = datetime.now(timezone.utc)
+                        wizard["opens_at"] = now
+                        wizard["closes_at"] = now + timedelta(minutes=dur_val)
+                        wizard["step"] = "questions"
+                        from app.core.time_utils import format_friendly_duration
+                        from app.bot.keyboards import get_admin_create_comp_questions_keyboard
                         prompt = (
-                            f"📅 *Create New EMYC Competition (Step 4/4)*\n\n"
+                            f"📝 *Create New EMYC Competition: Question Setup*\n\n"
                             f"*Title:* {wizard.get('title', 'Competition')}\n"
-                            f"*Duration:* {dur_val} minutes\n\n"
-                            f"Select the competition open window:"
+                            f"*Duration:* {format_friendly_duration(dur_val)}\n\n"
+                            f"How would you like to configure questions for this competition?"
                         )
                         await update.message.reply_text(
                             prompt,
-                            reply_markup=get_admin_create_comp_schedule_keyboard(lang=lang),
+                            reply_markup=get_admin_create_comp_questions_keyboard(),
                             parse_mode=ParseMode.MARKDOWN,
                         )
                         return
@@ -473,19 +478,21 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             lang = context.user_data.get("admin_lang", "en")
             if td is not None:
                 context.user_data.pop("editing_sched_comp_id", None)
+                dur_minutes = max(1, int(td.total_seconds() / 60))
                 now = datetime.now(timezone.utc)
                 async with AsyncSessionLocal() as db:
                     comp = await db.get(Competition, uuid.UUID(comp_id_str))
                     if comp:
+                        comp.duration_minutes = dur_minutes
                         if comp.status == CompetitionStatus.LIVE:
-                            comp.closes_at = now + td
+                            comp.closes_at = comp.opens_at + td
                         else:
                             comp.opens_at = now
                             comp.closes_at = now + td
                         await db.commit()
                 sched_label = format_timedelta_friendly(td)
                 await update.message.reply_text(
-                    f"✅ *Schedule Updated!*\n\nCompetition open window is now set to *{sched_label}*.",
+                    f"✅ *Schedule Updated!*\n\nCompetition duration is now set to *{sched_label}*.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")]]),
                     parse_mode=ParseMode.MARKDOWN,
                 )

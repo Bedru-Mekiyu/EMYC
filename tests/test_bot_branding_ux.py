@@ -364,7 +364,7 @@ def test_human_readable_schedule_and_duration_formatters():
 @pytest.mark.asyncio
 async def test_participant_exam_info_screen_human_readable(db_session: AsyncSession):
     """Verifies that the participant exam info screen renders clean human-readable schedule and format."""
-    now = datetime(2026, 10, 4, 11, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     comp = Competition(
         title="Ramadan Cup 2026",
         status=CompetitionStatus.LIVE,
