@@ -23,101 +23,164 @@
         <p id="lbl-participant">Student</p>
       </div>
     </div>
+
+    <!-- Centered Countdown Timer Badge -->
+    <div id="timer-box" class="timer-badge">
+      <span class="timer-icon">⏱️</span>
+      <span id="timer-text">--:--</span>
+    </div>
+
+    <!-- Right Quick Controls -->
     <div class="header-controls">
-      <!-- Audio Mute Toggle -->
-      <button id="btn-sound-toggle" class="btn-icon" title="Toggle Sound">🔊</button>
-      <!-- Font Scale Toggle -->
-      <button id="btn-font-toggle" class="btn-icon" title="Adjust Text Size">A±</button>
-      <!-- Language Picker -->
-      <button id="btn-lang-picker" class="btn-pill">
+      <!-- Language Selector Button -->
+      <button id="btn-lang-picker" class="btn-pill" aria-label="Change Language">
         <span>🌐</span> <span id="lbl-current-lang">EN</span>
       </button>
-      <!-- Live Timer Badge -->
-      <div id="timer-box" class="timer-badge">
-        <span>⏱️</span>
-        <span id="timer-text">--:--</span>
-      </div>
+      <!-- Quick Settings / Controls Sheet -->
+      <button id="btn-settings-toggle" class="btn-icon" aria-label="Settings">⚙️</button>
     </div>
   </header>
 
-  <!-- Progress Bar -->
+  <!-- Real-time Progress Bar -->
   <div class="progress-bar-container">
     <div id="progress-fill" class="progress-bar-fill"></div>
   </div>
 
-  <!-- Loading State -->
-  <div id="view-loading" class="status-screen">
-    <div class="spinner"></div>
-    <h3 id="lbl-loading">Loading examination session...</h3>
-  </div>
-
-  <!-- Pre-Exam Instructions & Readiness View -->
-  <div id="view-instructions" class="status-screen" style="display: none;">
-    <div style="font-size: 52px; margin-bottom: 12px;">📋</div>
-    <h2 id="lbl-instr-title">Examination Instructions</h2>
-    <p id="lbl-instr-desc">Please review the rules below before starting your examination session.</p>
-    
-    <div class="instructions-card">
-      <div class="instr-row">
-        <span>📝 <b id="lbl-rule-q-label">Total Questions:</b></span>
-        <span id="instr-total-q" class="badge-emerald">100</span>
-      </div>
-      <div class="instr-row">
-        <span>⏱️ <b id="lbl-rule-time-label">Duration:</b></span>
-        <span id="instr-duration" class="badge-gold">60 mins</span>
-      </div>
-      <div class="instr-divider"></div>
-      <div class="instr-rules-list">
-        <div class="rule-item">✅ <span id="lbl-rule-1">1 point per correct answer. Zero penalty for incorrect.</span></div>
-        <div class="rule-item">💾 <span id="lbl-rule-2">All answers are saved locally in real-time on your phone.</span></div>
-        <div class="rule-item">⏰ <span id="lbl-rule-3">Exam will auto-submit when countdown timer reaches zero.</span></div>
-      </div>
+  <!-- Viewport App Wrapper -->
+  <div class="app-viewport">
+    <!-- 1. Loading State -->
+    <div id="view-loading" class="status-screen">
+      <div class="spinner"></div>
+      <h3 id="lbl-loading">Loading examination session...</h3>
     </div>
 
-    <button id="btn-start-exam-now" class="btn btn-primary btn-large" style="width: 100%;">
-      <span id="lbl-start-exam-now">Begin Examination Now 🚀</span>
-    </button>
-  </div>
-
-  <!-- Exam Main Interface -->
-  <main id="view-exam" class="main-content" style="display: none;">
-    <div class="question-card">
-      <div class="question-meta">
-        <span id="lbl-question-badge" class="question-badge">Question 1 of 100</span>
-        <div class="meta-right-actions">
-          <button id="btn-flag-toggle" class="btn-flag">
-            <span>🚩</span> <span id="lbl-flag-text">Flag</span>
-          </button>
-          <span id="lbl-answer-status" class="status-pill">Unanswered</span>
+    <!-- 2. Pre-Exam Instructions & Readiness View -->
+    <div id="view-instructions" class="status-screen" style="display: none;">
+      <div class="screen-hero-icon">📋</div>
+      <h2 id="lbl-instr-title">Examination Instructions</h2>
+      <p id="lbl-instr-desc">Please review the rules below before starting your examination session.</p>
+      
+      <div class="instructions-card">
+        <div class="instr-row">
+          <span>📝 <b id="lbl-rule-q-label">Total Questions:</b></span>
+          <span id="instr-total-q" class="badge-emerald">100</span>
+        </div>
+        <div class="instr-row">
+          <span>⏱️ <b id="lbl-rule-time-label">Duration:</b></span>
+          <span id="instr-duration" class="badge-gold">60 mins</span>
+        </div>
+        <div class="instr-divider"></div>
+        <div class="instr-rules-list">
+          <div class="rule-item">✅ <span id="lbl-rule-1">1 point per correct answer. Zero penalty for incorrect.</span></div>
+          <div class="rule-item">💾 <span id="lbl-rule-2">All answers are saved locally in real-time on your phone.</span></div>
+          <div class="rule-item">⏰ <span id="lbl-rule-3">Exam will auto-submit when countdown timer reaches zero.</span></div>
         </div>
       </div>
-      <div id="question-text" class="question-text">
-        Question text will load here...
+
+      <button id="btn-start-exam-now" class="btn btn-primary btn-hero">
+        <span id="lbl-start-exam-now">Begin Examination Now 🚀</span>
+      </button>
+    </div>
+
+    <!-- 3. Exam Main Interface (Scrollable Content Container) -->
+    <main id="view-exam" class="main-content" style="display: none;">
+      <!-- Question Card Container -->
+      <div id="question-card" class="question-card">
+        <div class="question-meta">
+          <span id="lbl-question-badge" class="question-badge">Question 1 of 100</span>
+          <div class="meta-right-actions">
+            <button id="btn-flag-toggle" class="btn-flag">
+              <span>🚩</span> <span id="lbl-flag-text">Flag</span>
+            </button>
+            <span id="lbl-answer-status" class="status-pill">Unanswered</span>
+          </div>
+        </div>
+        <div id="question-text" class="question-text">
+          Question text will load here...
+        </div>
+      </div>
+
+      <!-- Options Container (A, B, C, D) -->
+      <div id="options-container" class="options-list">
+        <!-- Options injected dynamically by app.js -->
+      </div>
+
+      <!-- Contextual Clear Selection Link -->
+      <div class="clear-selection-wrapper">
+        <button id="btn-clear-selection" class="btn-clear-link" style="display: none;">
+          <span id="lbl-clear-selection">Clear selection ✕</span>
+        </button>
+      </div>
+
+      <!-- Subtle Mobile Swipe Guidance -->
+      <div class="swipe-hint-container">
+        <span id="lbl-swipe-hint">Swipe ◀ ▶ to navigate questions</span>
+      </div>
+    </main>
+
+    <!-- 4. Result Screen -->
+    <div id="view-result" class="status-screen" style="display: none;">
+      <div class="screen-hero-icon">🏆</div>
+      <h2 id="lbl-result-title">Exam Submitted!</h2>
+      <div class="score-box">
+        <div id="result-score" class="score-number">--</div>
+        <div id="lbl-score-caption" style="font-size: 13px; color: var(--text-secondary);">Total Score</div>
+        <div class="result-stats-row">
+          <div>
+            <span class="text-emerald font-bold" id="result-correct">0</span>
+            <div class="stat-sub">Correct</div>
+          </div>
+          <div>
+            <span class="text-danger font-bold" id="result-incorrect">0</span>
+            <div class="stat-sub">Incorrect</div>
+          </div>
+          <div>
+            <span class="text-blue font-bold" id="result-time">0s</span>
+            <div class="stat-sub">Time Taken</div>
+          </div>
+        </div>
+      </div>
+      <p id="lbl-result-msg" class="result-notice">
+        Your answers have been securely recorded. Official ranks and certificates will be released when the competition closes.
+      </p>
+      <div class="action-stack">
+        <button id="btn-practice-again" class="btn btn-secondary btn-full" style="display: none;">
+          🎯 Try Another Practice Test
+        </button>
+        <button id="btn-exit" class="btn btn-primary btn-full">
+          Exit to Telegram
+        </button>
       </div>
     </div>
 
-    <!-- Options Container -->
-    <div id="options-container" class="options-list">
-      <!-- Options A, B, C, D injected dynamically -->
+    <!-- 5. Error / Notice Screen -->
+    <div id="view-error" class="status-screen" style="display: none;">
+      <div class="screen-hero-icon" id="error-icon">⚠️</div>
+      <h2 id="error-title">Notice</h2>
+      <p id="error-desc">An error occurred.</p>
+      <div class="action-stack">
+        <button id="btn-practice-trigger" class="btn btn-accent btn-full">
+          🎯 Try Practice Exam
+        </button>
+        <button id="btn-error-action" class="btn btn-primary btn-full">Try Again</button>
+      </div>
     </div>
-  </main>
+  </div>
 
-  <!-- Bottom Navigation Action Bar -->
+  <!-- Ergonomic Bottom Action Dock (3-Item Layout, Never Occluded) -->
   <nav id="bottom-bar" class="bottom-controls" style="display: none;">
-    <button id="btn-prev" class="btn btn-secondary">
+    <button id="btn-prev" class="btn btn-secondary btn-dock-action">
       <span>◀</span> <span id="lbl-prev">Prev</span>
     </button>
-    <button id="btn-grid" class="btn btn-secondary">
-      <span>🗺️</span> <span id="lbl-grid">100</span>
+    
+    <!-- Center Progress Navigator Bubble -->
+    <button id="btn-grid" class="btn btn-matrix-bubble">
+      <span>🗺️</span> <span id="lbl-grid">0/100</span>
     </button>
-    <button id="btn-clear" class="btn btn-secondary">
-      <span>🗑️</span> <span id="lbl-clear">Clear</span>
-    </button>
-    <button id="btn-next" class="btn btn-secondary">
-      <span id="lbl-next">Next</span> <span>▶</span>
-    </button>
-    <button id="btn-finish" class="btn btn-primary">
-      <span id="lbl-finish">Submit</span>
+    
+    <!-- Primary Next / Submit Adaptive Action -->
+    <button id="btn-next" class="btn btn-primary btn-dock-primary">
+      <span id="lbl-next-action">Next</span> <span>▶</span>
     </button>
   </nav>
 
@@ -126,7 +189,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="lbl-matrix-title">Question Navigator</h3>
-        <button id="btn-close-grid" class="btn btn-secondary" style="padding: 6px 12px;">✕</button>
+        <button id="btn-close-grid" class="btn btn-icon-close">✕</button>
       </div>
       <!-- Filter Tabs -->
       <div class="filter-tabs">
@@ -134,7 +197,7 @@
         <div id="tab-filter-unans" class="filter-tab">Unanswered (<span id="count-unans">100</span>)</div>
         <div id="tab-filter-flagged" class="filter-tab">Flagged (<span id="count-flagged">0</span>)</div>
       </div>
-      <!-- Quick Jump Jumpers -->
+      <!-- Quick Jump Shortcuts -->
       <div class="quick-jump-row">
         <button id="btn-jump-first-unans" class="btn-jump-pill">⚠️ <span id="lbl-jump-unans">Jump to Unanswered</span></button>
         <button id="btn-jump-first-flagged" class="btn-jump-pill">🚩 <span id="lbl-jump-flagged">Jump to Flagged</span></button>
@@ -146,9 +209,9 @@
         <div class="legend-item"><span class="legend-dot current"></span> <span id="lbl-legend-cur">Current</span></div>
       </div>
       <div id="matrix-container" class="question-grid">
-        <!-- 1..100 grid bubbles generated dynamically -->
+        <!-- 1..100 cells generated dynamically -->
       </div>
-      <button id="btn-finish-from-grid" class="btn btn-accent" style="width: 100%;">
+      <button id="btn-finish-from-grid" class="btn btn-accent btn-full">
         🚀 <span id="lbl-finish-from-grid">Review & Submit Exam</span>
       </button>
     </div>
@@ -159,7 +222,7 @@
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="lbl-lang-modal-title">Select Language / ቋንቋ ይምረጡ</h3>
-        <button id="btn-close-lang" class="btn btn-secondary" style="padding: 6px 12px;">✕</button>
+        <button id="btn-close-lang" class="btn btn-icon-close">✕</button>
       </div>
       <div class="lang-grid">
         <div class="lang-choice-card" data-lang="en">
@@ -194,14 +257,67 @@
     </div>
   </div>
 
+  <!-- Quick Settings & Accessibility Modal -->
+  <div id="modal-settings" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="lbl-settings-modal-title">Settings & Controls</h3>
+        <button id="btn-close-settings" class="btn btn-icon-close">✕</button>
+      </div>
+      <div class="settings-list">
+        <!-- Audio Feedback Toggle -->
+        <div class="settings-row">
+          <div class="settings-label">
+            <span class="settings-icon">🔊</span>
+            <div>
+              <b id="lbl-setting-sound-title">Audio Feedback</b>
+              <p id="lbl-setting-sound-sub">Click & submission chimes</p>
+            </div>
+          </div>
+          <button id="btn-setting-sound-toggle" class="btn btn-secondary btn-setting-action">
+            <span id="lbl-setting-sound-state">On</span>
+          </button>
+        </div>
+
+        <!-- Text Zoom Scale -->
+        <div class="settings-row">
+          <div class="settings-label">
+            <span class="settings-icon">🔍</span>
+            <div>
+              <b id="lbl-setting-font-title">Text Size</b>
+              <p id="lbl-setting-font-sub">Adjust question reading size</p>
+            </div>
+          </div>
+          <div class="font-zoom-toggles">
+            <button id="btn-font-smaller" class="btn btn-secondary btn-zoom">A-</button>
+            <button id="btn-font-default" class="btn btn-secondary btn-zoom">A</button>
+            <button id="btn-font-larger" class="btn btn-secondary btn-zoom">A+</button>
+          </div>
+        </div>
+
+        <!-- View Guidelines Shortcut -->
+        <div class="settings-row">
+          <div class="settings-label">
+            <span class="settings-icon">📋</span>
+            <div>
+              <b id="lbl-setting-guidelines-title">Exam Guidelines</b>
+              <p id="lbl-setting-guidelines-sub">Review competition rules</p>
+            </div>
+          </div>
+          <button id="btn-show-guidelines" class="btn btn-secondary btn-setting-action">View</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Final Submission Confirmation Modal -->
   <div id="modal-confirm" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="lbl-confirm-title">Submit Examination?</h3>
-        <button id="btn-close-confirm" class="btn btn-secondary" style="padding: 6px 12px;">✕</button>
+        <button id="btn-close-confirm" class="btn btn-icon-close">✕</button>
       </div>
-      <p id="lbl-confirm-msg" style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
+      <p id="lbl-confirm-msg" class="confirm-message">
         Are you sure you want to finalize your exam? Once submitted, your answers cannot be changed.
       </p>
       
@@ -221,61 +337,13 @@
         </div>
       </div>
 
-      <div id="confirm-warning-box" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); padding: 12px; border-radius: 12px; color: #ef4444; font-size: 13px; font-weight: 600; margin-bottom: 20px;">
+      <div id="confirm-warning-box" class="confirm-warning-banner" style="display: none;">
         ⚠️ Warning: You have unanswered questions.
       </div>
-      <div style="display: flex; gap: 10px;">
+      <div class="confirm-actions-row">
         <button id="btn-cancel-submit" class="btn btn-secondary" style="flex: 1;">Cancel</button>
         <button id="btn-do-submit" class="btn btn-accent" style="flex: 1.4;">Yes, Submit</button>
       </div>
-    </div>
-  </div>
-
-  <!-- Result Screen -->
-  <div id="view-result" class="status-screen" style="display: none;">
-    <div style="font-size: 54px;">🏆</div>
-    <h2 id="lbl-result-title">Exam Submitted!</h2>
-    <div class="score-box">
-      <div id="result-score" class="score-number">--</div>
-      <div id="lbl-score-caption" style="font-size: 13px; color: var(--text-secondary);">Total Score</div>
-      <div style="display: flex; justify-content: space-around; margin-top: 18px; border-top: 1px solid var(--card-border); padding-top: 14px;">
-        <div>
-          <span style="color: var(--accent-emerald); font-weight: 700;" id="result-correct">0</span>
-          <div style="font-size: 11px; color: var(--text-secondary);">Correct</div>
-        </div>
-        <div>
-          <span style="color: var(--accent-danger); font-weight: 700;" id="result-incorrect">0</span>
-          <div style="font-size: 11px; color: var(--text-secondary);">Incorrect</div>
-        </div>
-        <div>
-          <span style="color: var(--accent-blue); font-weight: 700;" id="result-time">0s</span>
-          <div style="font-size: 11px; color: var(--text-secondary);">Time Taken</div>
-        </div>
-      </div>
-    </div>
-    <p id="lbl-result-msg" style="color: var(--text-secondary); font-size: 13px;">
-      Your answers have been securely recorded. Official ranks and certificates will be released when the competition closes.
-    </p>
-    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
-      <button id="btn-practice-again" class="btn btn-secondary" style="display: none;">
-        🎯 Try Another Practice Test
-      </button>
-      <button id="btn-exit" class="btn btn-primary" style="width: 100%;">
-        Exit to Telegram
-      </button>
-    </div>
-  </div>
-
-  <!-- Error / Status Screen -->
-  <div id="view-error" class="status-screen" style="display: none;">
-    <div style="font-size: 48px;" id="error-icon">⚠️</div>
-    <h2 id="error-title">Notice</h2>
-    <p id="error-desc">An error occurred.</p>
-    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; margin: 0 auto;">
-      <button id="btn-practice-trigger" class="btn btn-accent" style="width: 100%;">
-        🎯 Try Practice Exam
-      </button>
-      <button id="btn-error-action" class="btn btn-primary" style="width: 100%;">Try Again</button>
     </div>
   </div>
 

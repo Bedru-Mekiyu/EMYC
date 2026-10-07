@@ -1,25 +1,31 @@
 /**
  * Ethiopian Muslim Youth Council (EMYC)
  * Telegram Mini App High-Throughput Exam Engine
- * Feature-Complete Client: Offline-First, Audio Effects, Practice Mode, Language Picker & Accessible Zoom
+ * Feature-Complete Client: Viewport Hardened, Mobile Gestures, Ergonomic Action Dock & Offline-First
  */
 
 (function () {
   'use strict';
 
-  // 1. Telegram WebApp Integration & Haptics
+  // 1. Telegram WebApp Integration & Viewport Protection
   const tg = window.Telegram?.WebApp;
   if (tg) {
     tg.ready();
     tg.expand();
     try {
-      tg.enableClosingConfirmation();
+      // Prevent accidental pull-to-dismiss while scrolling questions
+      tg.disableVerticalSwipes?.();
     } catch (e) {
-      console.warn("Closing confirmation not supported on this client", e);
+      console.warn("disableVerticalSwipes not supported", e);
+    }
+    try {
+      tg.enableClosingConfirmation?.();
+    } catch (e) {
+      console.warn("Closing confirmation not supported", e);
     }
   }
 
-  // Audio Effects Synthesizer (Web Audio API - 100% offline, zero audio files required)
+  // Audio Feedback Synthesizer (Web Audio API - 100% offline, zero network assets)
   let soundEnabled = true;
   let audioCtx = null;
 
@@ -53,7 +59,6 @@
         osc.start(now);
         osc.stop(now + 0.08);
       } else if (type === 'success') {
-        // Ascending chime
         [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
           const o = audioCtx.createOscillator();
           const g = audioCtx.createGain();
@@ -81,7 +86,7 @@
         tg?.HapticFeedback?.selectionChanged();
       }
     } catch (e) {
-      // Haptics optional on desktop
+      // Haptics optional
     }
   }
 
@@ -124,9 +129,7 @@
       'lbl-title': 'title',
       'lbl-loading': 'loading',
       'lbl-prev': 'prev',
-      'lbl-next': 'next',
-      'lbl-clear': 'clear',
-      'lbl-finish': 'finish',
+      'lbl-clear-selection': 'clear_selection',
       'lbl-matrix-title': 'review_title',
       'lbl-legend-ans': 'answered_count',
       'lbl-legend-unans': 'unanswered_count',
@@ -148,7 +151,11 @@
       'lbl-jump-unans': 'jump_unanswered',
       'lbl-jump-flagged': 'jump_flagged',
       'lbl-lang-modal-title': 'lang_selector_title',
+      'lbl-settings-modal-title': 'settings_title',
+      'lbl-setting-sound-title': 'settings_sound',
+      'lbl-setting-font-title': 'settings_font',
       'btn-practice-trigger': 'practice_btn',
+      'lbl-swipe-hint': 'swipe_hint',
     };
     for (const [id, key] of Object.entries(mappings)) {
       const el = document.getElementById(id);
@@ -166,9 +173,8 @@
   let deadlineEpoch = null;
   let isSubmitting = false;
   let isPracticeMode = false;
-  let activeFilter = 'all'; // 'all', 'unans', 'flagged'
+  let activeFilter = 'all';
 
-  // Backend API URL (Targeting Render deployment)
   const BACKEND_URL = 'https://emyc.onrender.com';
 
   function getInitData() {
@@ -193,7 +199,7 @@
     };
   }
 
-  // Network Status Banner
+  // Network Banner
   function showNetworkToast(isOnline) {
     const toast = document.getElementById('toast-network');
     const toastText = document.getElementById('toast-text');
@@ -215,7 +221,7 @@
   window.addEventListener('online', () => showNetworkToast(true));
   window.addEventListener('offline', () => showNetworkToast(false));
 
-  // 4. Session Loading & Initialization
+  // 4. Session Loading
   async function initExamSession() {
     applyStaticLocales();
     showView('loading');
@@ -240,13 +246,11 @@
 
       const data = await res.json();
 
-      // Case A: Competition not live or scheduled
       if (data.status === 'not_live' || data.status === 'scheduled') {
         showError(t('not_live_title'), data.message || t('not_live_desc'), true, true);
         return;
       }
 
-      // Case B: Already submitted
       if (data.status === 'already_submitted') {
         showResultView({
           score: data.score,
@@ -257,13 +261,11 @@
         return;
       }
 
-      // Case C: Exam Ready -> Show Instructions Sheet First
       if (data.status === 'ready') {
         session = data;
         questions = data.questions || [];
         isPracticeMode = false;
 
-        // Restore local state
         const keys = getStorageKeys(session.attempt_id);
         const cachedAns = localStorage.getItem(keys.answersKey);
         if (cachedAns) {
@@ -281,7 +283,6 @@
         const pName = document.getElementById('lbl-participant');
         if (pName && data.participant_name) pName.textContent = data.participant_name;
 
-        // Populate Instructions Sheet
         const qCountEl = document.getElementById('instr-total-q');
         const durEl = document.getElementById('instr-duration');
         if (qCountEl) qCountEl.textContent = questions.length;
@@ -290,12 +291,12 @@
         showView('instructions');
       }
     } catch (err) {
-      console.warn("Server connection failed, offering practice mode:", err);
+      console.warn("Connection issue, practice mode available:", err);
       showError(t('error_title'), "Unable to connect to exam server at this moment. You can test your phone in Practice Mode below.", true, true);
     }
   }
 
-  // 5. Practice Exam Mode (Interactive 5-Question Demo)
+  // 5. Practice Exam Mode
   function startPracticeExam() {
     isPracticeMode = true;
     session = {
@@ -361,7 +362,7 @@
     showView('exam');
   }
 
-  // 6. Timer Engine
+  // 6. Countdown Timer
   function setupCountdown(timeLeftSeconds) {
     if (timerInterval) clearInterval(timerInterval);
     deadlineEpoch = Date.now() + timeLeftSeconds * 1000;
@@ -398,17 +399,24 @@
     timerInterval = setInterval(tick, 1000);
   }
 
-  // 7. Render Question
-  function showQuestion(index) {
+  // 7. Render Question with Slide Animations
+  function showQuestion(index, direction = null) {
     if (index < 0 || index >= questions.length) return;
     currentIndex = index;
     const q = questions[index];
 
-    // Badge and count
+    const card = document.getElementById('question-card');
+    if (card) {
+      card.classList.remove('anim-slide-left', 'anim-slide-right');
+      if (direction === 'next') card.classList.add('anim-slide-left');
+      if (direction === 'prev') card.classList.add('anim-slide-right');
+    }
+
+    // Badge
     const badge = document.getElementById('lbl-question-badge');
     if (badge) badge.textContent = `${t('question')} ${index + 1} ${t('of')} ${questions.length}`;
 
-    // Flag button state
+    // Flag button
     const flagBtn = document.getElementById('btn-flag-toggle');
     const flagText = document.getElementById('lbl-flag-text');
     const isFlagged = flags.has(q.question_id);
@@ -427,7 +435,7 @@
     const qText = document.getElementById('question-text');
     if (qText) qText.textContent = q.question_text;
 
-    // Render Options
+    // Options
     const optContainer = document.getElementById('options-container');
     if (optContainer) {
       optContainer.innerHTML = '';
@@ -449,22 +457,45 @@
       }
     }
 
-    // Update Navigation Buttons
-    const btnPrev = document.getElementById('btn-prev');
-    const btnNext = document.getElementById('btn-next');
-    if (btnPrev) btnPrev.disabled = (currentIndex === 0);
-    if (btnNext) btnNext.disabled = (currentIndex === questions.length - 1);
+    // Contextual Clear Link
+    const clearBtn = document.getElementById('btn-clear-selection');
+    if (clearBtn) {
+      clearBtn.style.display = selected ? 'inline-block' : 'none';
+    }
 
-    // Update Progress Bar
+    // Update Bottom Action Dock
+    const btnPrev = document.getElementById('btn-prev');
+    if (btnPrev) btnPrev.disabled = (currentIndex === 0);
+
+    const btnNext = document.getElementById('btn-next');
+    const nextLbl = document.getElementById('lbl-next-action');
+    const isLast = (currentIndex === questions.length - 1);
+
+    if (btnNext && nextLbl) {
+      if (isLast) {
+        nextLbl.textContent = t('finish');
+        btnNext.className = 'btn btn-accent btn-dock-primary';
+      } else {
+        nextLbl.textContent = t('next');
+        btnNext.className = 'btn btn-primary btn-dock-primary';
+      }
+    }
+
+    // Update Progress Bar & Navigator Bubble
     const answeredCount = Object.keys(answers).length;
     const pct = (answeredCount / Math.max(1, questions.length)) * 100;
     const fill = document.getElementById('progress-fill');
     if (fill) fill.style.width = `${pct}%`;
 
+    const gridBtn = document.getElementById('lbl-grid');
+    if (gridBtn) {
+      gridBtn.textContent = `${answeredCount}/${questions.length}`;
+    }
+
     updateMatrixCells();
   }
 
-  // 8. Select & Persist Answer (Offline-First)
+  // 8. Select & Persist Answer
   function selectOption(questionId, letter) {
     answers[questionId] = letter;
 
@@ -564,12 +595,6 @@
     if (cAll) cAll.textContent = questions.length;
     if (cUnans) cUnans.textContent = unansCount;
     if (cFlag) cFlag.textContent = flaggedCount;
-
-    const gridBtn = document.getElementById('lbl-grid');
-    if (gridBtn) {
-      const answered = Object.keys(answers).length;
-      gridBtn.textContent = `${answered}/${questions.length}`;
-    }
   }
 
   function setMatrixFilter(filterType) {
@@ -601,7 +626,7 @@
     }
   }
 
-  // 12. Submit Batch Answers (Single Transaction)
+  // 12. Submit Batch Answers
   async function submitExamBatch(isAutoTimeout = false) {
     if (isSubmitting || !session) return;
     isSubmitting = true;
@@ -611,7 +636,6 @@
     closeModal('modal-grid');
     closeModal('modal-confirm');
 
-    // Handle Practice Mode client-side
     if (isPracticeMode) {
       let score = 0;
       questions.forEach(q => {
@@ -682,7 +706,7 @@
     }
   }
 
-  // 13. Modal Helpers & Submission Summary
+  // 13. Modals & Confirmation
   function openModal(modalId) {
     triggerHaptic('light');
     const modal = document.getElementById(modalId);
@@ -720,7 +744,7 @@
     openModal('modal-confirm');
   }
 
-  // 14. Screen View Management
+  // 14. View Management
   function showView(viewName) {
     const views = ['loading', 'instructions', 'exam', 'result', 'error'];
     views.forEach(v => {
@@ -789,41 +813,65 @@
     }
   }
 
-  // 15. Header Controls (Audio, Zoom, Language)
-  function toggleSound() {
-    soundEnabled = !soundEnabled;
-    const btn = document.getElementById('btn-sound-toggle');
-    if (btn) btn.textContent = soundEnabled ? '🔊' : '🔇';
-  }
+  // 15. Touch Swipe Gestures
+  let touchStartX = 0;
+  let touchStartY = 0;
 
-  function toggleFontSize() {
-    const body = document.body;
-    if (body.classList.contains('font-large')) {
-      body.classList.remove('font-large');
-      body.classList.add('font-small');
-    } else if (body.classList.contains('font-small')) {
-      body.classList.remove('font-small');
-    } else {
-      body.classList.add('font-large');
-    }
+  const examMain = document.getElementById('view-exam');
+  if (examMain) {
+    examMain.addEventListener('touchstart', (e) => {
+      touchStartX = e.changedTouches[0].screenX;
+      touchStartY = e.changedTouches[0].screenY;
+    }, { passive: true });
+
+    examMain.addEventListener('touchend', (e) => {
+      const diffX = e.changedTouches[0].screenX - touchStartX;
+      const diffY = e.changedTouches[0].screenY - touchStartY;
+
+      // Ensure horizontal swipe intent (not vertical scroll)
+      if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+        if (diffX < 0) {
+          // Swipe Left -> Next
+          if (currentIndex < questions.length - 1) {
+            playSound('tap');
+            triggerHaptic('light');
+            showQuestion(currentIndex + 1, 'next');
+          } else {
+            showSubmitConfirmation();
+          }
+        } else {
+          // Swipe Right -> Prev
+          if (currentIndex > 0) {
+            playSound('tap');
+            triggerHaptic('light');
+            showQuestion(currentIndex - 1, 'prev');
+          }
+        }
+      }
+    }, { passive: true });
   }
 
   // 16. Event Listeners Wiring
   document.getElementById('btn-prev')?.addEventListener('click', () => {
     playSound('tap');
     triggerHaptic('light');
-    if (currentIndex > 0) showQuestion(currentIndex - 1);
+    if (currentIndex > 0) showQuestion(currentIndex - 1, 'prev');
   });
 
   document.getElementById('btn-next')?.addEventListener('click', () => {
     playSound('tap');
     triggerHaptic('light');
-    if (currentIndex < questions.length - 1) showQuestion(currentIndex + 1);
+    if (currentIndex < questions.length - 1) {
+      showQuestion(currentIndex + 1, 'next');
+    } else {
+      showSubmitConfirmation();
+    }
   });
 
-  document.getElementById('btn-clear')?.addEventListener('click', clearCurrentOption);
+  document.getElementById('btn-clear-selection')?.addEventListener('click', clearCurrentOption);
   document.getElementById('btn-flag-toggle')?.addEventListener('click', toggleCurrentFlag);
 
+  // Matrix / Grid Modal
   document.getElementById('btn-grid')?.addEventListener('click', () => {
     playSound('tap');
     updateMatrixCells();
@@ -831,12 +879,10 @@
   });
   document.getElementById('btn-close-grid')?.addEventListener('click', () => closeModal('modal-grid'));
 
-  // Filter Tabs
   document.getElementById('tab-filter-all')?.addEventListener('click', () => setMatrixFilter('all'));
   document.getElementById('tab-filter-unans')?.addEventListener('click', () => setMatrixFilter('unans'));
   document.getElementById('tab-filter-flagged')?.addEventListener('click', () => setMatrixFilter('flagged'));
 
-  // Quick Jumps
   document.getElementById('btn-jump-first-unans')?.addEventListener('click', jumpToFirstUnanswered);
   document.getElementById('btn-jump-first-flagged')?.addEventListener('click', jumpToFirstFlagged);
 
@@ -850,9 +896,38 @@
     });
   });
 
-  // Sound & Zoom
-  document.getElementById('btn-sound-toggle')?.addEventListener('click', toggleSound);
-  document.getElementById('btn-font-toggle')?.addEventListener('click', toggleFontSize);
+  // Settings Modal
+  document.getElementById('btn-settings-toggle')?.addEventListener('click', () => openModal('modal-settings'));
+  document.getElementById('btn-close-settings')?.addEventListener('click', () => closeModal('modal-settings'));
+
+  document.getElementById('btn-setting-sound-toggle')?.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    const lbl = document.getElementById('lbl-setting-sound-state');
+    if (lbl) lbl.textContent = soundEnabled ? 'On' : 'Muted';
+    triggerHaptic('selection');
+  });
+
+  document.getElementById('btn-font-smaller')?.addEventListener('click', () => {
+    document.body.classList.remove('font-large');
+    document.body.classList.add('font-small');
+    triggerHaptic('selection');
+  });
+
+  document.getElementById('btn-font-default')?.addEventListener('click', () => {
+    document.body.classList.remove('font-large', 'font-small');
+    triggerHaptic('selection');
+  });
+
+  document.getElementById('btn-font-larger')?.addEventListener('click', () => {
+    document.body.classList.remove('font-small');
+    document.body.classList.add('font-large');
+    triggerHaptic('selection');
+  });
+
+  document.getElementById('btn-show-guidelines')?.addEventListener('click', () => {
+    closeModal('modal-settings');
+    showView('instructions');
+  });
 
   // Start exam from instructions
   document.getElementById('btn-start-exam-now')?.addEventListener('click', () => {
@@ -871,7 +946,6 @@
   });
 
   // Submission Dialog
-  document.getElementById('btn-finish')?.addEventListener('click', showSubmitConfirmation);
   document.getElementById('btn-finish-from-grid')?.addEventListener('click', () => {
     closeModal('modal-grid');
     showSubmitConfirmation();
@@ -885,7 +959,7 @@
     if (tg) tg.close();
   });
 
-  // Initial language setup & startup
+  // Initial startup
   setLanguage(currentLang);
   initExamSession();
 })();
