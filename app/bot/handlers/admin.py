@@ -89,7 +89,6 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("pending_announcement", None)
     context.user_data.pop("create_comp", None)
     context.user_data.pop("q_wizard", None)
-    context.user_data.pop("admin_candidate_preview", None)
 
     user = update.effective_user
     user_id = user.id if user else 0
@@ -574,45 +573,13 @@ async def cb_admin_setup_sample(update: Update, context: ContextTypes.DEFAULT_TY
         f"*Questions:* {len(sample_questions)}\n"
         f"*Status:* `{status_str}`\n"
         f"*Duration:* {comp.duration_minutes} minutes\n\n"
-        f"You can now manage the competition or switch to participant view to test taking the exam!"
+        f"You can now manage the competition via Competition Controls."
     )
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⚙️ Competition Controls", callback_data="admin:competition")],
-        [InlineKeyboardButton("👤 Switch to Participant View", callback_data="admin:to_participant")],
         [InlineKeyboardButton("◀️ Back to Admin Panel", callback_data="admin:home")],
     ])
     await query.edit_message_text(msg, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-
-
-@require_admin
-async def cb_admin_to_participant(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Switches the admin view to the participant main menu for testing."""
-    query = update.callback_query
-    await query.answer("Switching to Participant View...", show_alert=False)
-    user = update.effective_user
-    context.user_data["admin_candidate_preview"] = True
-
-    # Ensure admin has a participant record for testing
-    async with AsyncSessionLocal() as db:
-        p = await ParticipantService.get_participant_by_telegram_id(db, user.id)
-        if not p:
-            p = Participant(
-                telegram_user_id=user.id,
-                telegram_username=user.username or "admin_tester",
-                full_name=user.full_name or "Admin Test Candidate",
-                phone_number="+251900000000",
-                membership_id=f"ADMIN-{user.id}",
-                is_active=True,
-            )
-            db.add(p)
-            await db.commit()
-
-    from app.bot.handlers.participant import get_user_lang, get_participant_display_name
-    lang = await get_user_lang(user.id)
-    name = get_participant_display_name(update)
-    text = get_text("welcome", lang, name=name)
-    keyboard = get_main_menu_keyboard(lang, is_admin=True)
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 
 @require_admin

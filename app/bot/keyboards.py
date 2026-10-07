@@ -10,22 +10,13 @@ def get_main_menu_keyboard(
     published_comp_id: Optional[uuid.UUID] = None,
 ) -> InlineKeyboardMarkup:
     """Participant main menu keyboard providing:
-    1. 🚀 Launch Exam (Mini App)
-    2. 🏆 Competition Details
-    3. 🌐 Change Language
-    4. ⚙️ Admin Dashboard (if user is admin)
+    1. 🏆 Competition
+    2. 🌐 Change Language
+    3. ⚙️ Admin Dashboard (if user is admin)
     """
-    from app.core.config import get_settings
-    from telegram import WebAppInfo
-    settings = get_settings()
-    webapp_url = getattr(settings, "WEBAPP_URL", "https://emyc-exam.pages.dev")
-
     rows = [
-        [InlineKeyboardButton("🚀 Launch Exam (Mini App)", web_app=WebAppInfo(url=webapp_url))],
-        [
-            InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start"),
-            InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang"),
-        ],
+        [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
+        [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")])
@@ -71,15 +62,16 @@ def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
 
 def get_start_exam_keyboard(competition_id: uuid.UUID, lang: str = "en") -> InlineKeyboardMarkup:
     """Confirmation to launch competition attempt.
-    Mandatory Telegram Mini App button ensuring zero Telegram message rate-limit collisions.
+    Mandatory Telegram Mini App button passing the active competition ID.
     """
     from app.core.config import get_settings
     from telegram import WebAppInfo
     settings = get_settings()
     webapp_url = getattr(settings, "WEBAPP_URL", "https://emyc-exam.pages.dev")
+    launch_url = f"{webapp_url}?comp_id={competition_id}"
 
     rows = [
-        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=launch_url))],
         [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
     ]
     return InlineKeyboardMarkup(rows)
@@ -242,28 +234,23 @@ def get_answer_review_nav_keyboard(
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Main administrative control panel keyboard with direct Mini App test launch,
-    candidate simulation mode, and competition/results controls.
+    """Main administrative control panel keyboard with clean, essential controls:
+    1. 🏆 Competition
+    2. 📊 Results
+    3. 📢 Announcement
+    4. 🌐 Language
     """
-    from app.core.config import get_settings
-    settings = get_settings()
-    webapp_url = getattr(settings, "WEBAPP_URL", None)
-
-    rows = []
-    if webapp_url:
-        from telegram import WebAppInfo
-        rows.append([InlineKeyboardButton("🚀 Launch Exam (Mini App)", web_app=WebAppInfo(url=webapp_url))])
-
-    rows.append([InlineKeyboardButton("👤 Test as Candidate / ተሳታፊ", callback_data="admin:to_participant")])
-    rows.append([
-        InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
-        InlineKeyboardButton("📊 Results", callback_data="admin:results"),
-    ])
-    rows.append([
-        InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
-        InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang"),
-    ])
-    return InlineKeyboardMarkup(rows)
+    keyboard = [
+        [
+            InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
+            InlineKeyboardButton("📊 Results", callback_data="admin:results"),
+        ],
+        [
+            InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
+            InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 
 def get_admin_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:

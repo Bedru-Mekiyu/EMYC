@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -190,6 +190,7 @@ async def web_login(
 
 @router.get("/session")
 async def get_exam_session(
+    comp_id: Optional[str] = Query(None),
     user: Dict[str, Any] = Depends(get_current_telegram_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -202,10 +203,12 @@ async def get_exam_session(
         raise HTTPException(status_code=400, detail="Invalid user object in session credentials")
 
     try:
-        session_data = await WebAppExamService.get_or_create_session(db, tg_user_id)
+        session_data = await WebAppExamService.get_or_create_session(db, tg_user_id, comp_id=comp_id)
         return session_data
     except CompetitionNotOpenError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except CompetitionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while loading the exam session.")
 

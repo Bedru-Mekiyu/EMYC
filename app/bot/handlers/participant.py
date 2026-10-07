@@ -96,8 +96,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings()
 
     # If user is an administrator and sent /start command, open Admin Dashboard directly
-    # UNLESS they are explicitly testing in candidate preview mode
-    if update.message and settings.is_admin(user.id) and not context.user_data.get("admin_candidate_preview"):
+    if update.message and settings.is_admin(user.id):
         from app.bot.handlers.admin import cmd_admin
         await cmd_admin(update, context)
         return
@@ -358,6 +357,7 @@ async def render_competition_state_for_participant(
                 from app.core.config import get_settings
                 from telegram import WebAppInfo
                 webapp_url = getattr(get_settings(), "WEBAPP_URL", "https://emyc-exam.pages.dev")
+                launch_url = f"{webapp_url}?comp_id={comp.id}"
                 text = (
                     "🚀 *Examination in Progress*\n\n"
                     f"• *Competition:* {comp.title}\n"
@@ -365,7 +365,7 @@ async def render_competition_state_for_participant(
                     "Tap below to continue taking your examination in the Mini App:"
                 )
                 kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 Continue Exam (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+                    [InlineKeyboardButton("🚀 Continue Exam (Mini App)", web_app=WebAppInfo(url=launch_url))],
                     [InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")],
                 ])
                 await _send_or_edit(target, text, reply_markup=kb)

@@ -34,6 +34,7 @@ class WebAppExamService:
     async def get_or_create_session(
         db: AsyncSession,
         telegram_user_id: int,
+        comp_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Prepares or resumes an exam session for a student in a single low-latency query.
         
@@ -66,8 +67,19 @@ class WebAppExamService:
                     "message": "Participant must verify membership and register first.",
                 }
 
-        # 2. Check for LIVE competition
-        comp = await CompetitionService.get_active_competition(db)
+        # 2. Resolve competition (explicit comp_id or active LIVE competition)
+        comp = None
+        if comp_id:
+            try:
+                comp_uuid = uuid.UUID(str(comp_id).strip())
+                comp_stmt = select(Competition).where(Competition.id == comp_uuid)
+                comp = (await db.execute(comp_stmt)).scalar_one_or_none()
+            except (ValueError, TypeError):
+                comp = None
+
+        if not comp:
+            comp = await CompetitionService.get_active_competition(db)
+
         if not comp:
             scheduled_comp = await CompetitionService.get_open_or_scheduled_competition(db)
             if scheduled_comp:
@@ -84,6 +96,91 @@ class WebAppExamService:
                 "status": "not_live",
                 "message": "No active competition session found at this time.",
             }
+
+        # Handle specific competition lifecycle states
+        if comp.status in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
+            return {
+                "status": "scheduled",
+                "competition_title": comp.title,
+                "opens_at": comp.opens_at.isoformat() if comp.opens_at else None,
+                "closes_at": comp.closes_at.isoformat() if comp.closes_at else None,
+                "duration_minutes": comp.duration_minutes,
+                "question_count": comp.question_count,
+                "message": "The competition is open, but the examination session has not started yet.",
+            }
+
+        if comp.status in [CompetitionStatus.CLOSED, CompetitionStatus.RESULTS_FINALIZED, CompetitionStatus.ARCHIVED, CompetitionStatus.PUBLISHED]:
+            att_stmt = (
+                select(ExamAttempt)
+                .where(
+                    and_(
+                        ExamAttempt.competition_id == comp.id,
+                        ExamAttempt.participant_id == participant.id,
+                    )
+                )
+                .order_by(ExamAttempt.started_at.desc())
+                .limit(1)
+            )
+            existing_attempt = (await db.execute(att_stmt)).scalars().first()
+            if existing_attempt and existing_attempt.status in [
+                AttemptStatus.SUBMITTED,
+                AttemptStatus.EXPIRED,
+                AttemptStatus.FINALIZED,
+            ]:
+                return {
+                    "status": "already_submitted",
+                    "attempt_id": str(existing_attempt.id),
+                    "submitted_at": existing_attempt.submitted_at.isoformat() if existing_attempt.submitted_at else None,
+                    "score": existing_attempt.score,
+                    "total_questions": comp.question_count,
+                    "competition_title": comp.title,
+                    "results_published": comp.status == CompetitionStatus.PUBLISHED,
+                }
+            return {
+                "status": "closed",
+                "message": "The examination session for this competition has concluded.",
+            }
+
+        if comp.status == CompetitionStatus.LIVE:
+            if comp.actual_exam_started_at and now < ensure_utc(comp.actual_exam_started_at):
+                return {
+                    "status": "scheduled",
+                    "competition_title": comp.title,
+                    "opens_at": comp.actual_exam_started_at.isoformat(),
+                    "closes_at": comp.actual_exam_ends_at.isoformat() if comp.actual_exam_ends_at else None,
+                    "duration_minutes": comp.duration_minutes,
+                    "question_count": comp.question_count,
+                    "message": "The examination session has not started yet.",
+                }
+            if (comp.actual_exam_ends_at and now >= ensure_utc(comp.actual_exam_ends_at)) or (comp.closes_at and now >= ensure_utc(comp.closes_at)):
+                att_stmt = (
+                    select(ExamAttempt)
+                    .where(
+                        and_(
+                            ExamAttempt.competition_id == comp.id,
+                            ExamAttempt.participant_id == participant.id,
+                        )
+                    )
+                    .order_by(ExamAttempt.started_at.desc())
+                    .limit(1)
+                )
+                existing_attempt = (await db.execute(att_stmt)).scalars().first()
+                if existing_attempt:
+                    if existing_attempt.status == AttemptStatus.IN_PROGRESS:
+                        await CompetitionService.auto_submit_expired_attempt(db, existing_attempt)
+                    return {
+                        "status": "already_submitted",
+                        "attempt_id": str(existing_attempt.id),
+                        "submitted_at": existing_attempt.submitted_at.isoformat() if existing_attempt.submitted_at else None,
+                        "score": existing_attempt.score,
+                        "total_questions": comp.question_count,
+                        "competition_title": comp.title,
+                        "results_published": False,
+                    }
+                return {
+                    "status": "closed",
+                    "message": "The examination session for this competition has ended.",
+                }
 
         # 3. Check for existing attempt
         att_stmt = (

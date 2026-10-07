@@ -230,7 +230,7 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     """Verifies that admins automatically receive Admin Dashboard on /start,
     can setup sample competitions with 1 click, and can switch to participant view."""
     from app.bot.handlers.participant import cmd_start
-    from app.bot.handlers.admin import cb_admin_competition, cb_admin_setup_sample, cb_admin_to_participant
+    from app.bot.handlers.admin import cb_admin_competition, cb_admin_setup_sample
     from app.core.config import settings
     from telegram import User
 
@@ -254,7 +254,6 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     assert "EMYC Competition Admin" in start_text
     start_kb = msg_start.reply_text.call_args[1]["reply_markup"]
     btn_texts = [b.text for row in start_kb.inline_keyboard for b in row]
-    assert len(btn_texts) == 3
     assert "🏆 Competition" in btn_texts
     assert "📢 Announcement" in btn_texts
     assert "🌐 Language" in btn_texts
@@ -290,22 +289,10 @@ async def test_admin_direct_start_and_competition_setup(db_session: AsyncSession
     setup_text = query_setup.edit_message_text.call_args[0][0]
     assert "Sample Competition Created!" in setup_text
     assert "LIVE" in setup_text
-
-    # 4. Admin clicks [Switch to Participant View] -> renders participant view with Admin Dashboard button
-    query_to_p = MagicMock()
-    query_to_p.answer = AsyncMock()
-    query_to_p.edit_message_text = AsyncMock()
-    update_to_p = MagicMock(spec=Update)
-    update_to_p.effective_user = admin_user
-    update_to_p.callback_query = query_to_p
-
-    await cb_admin_to_participant(update_to_p, context)
-    query_to_p.edit_message_text.assert_called_once()
-    p_text = query_to_p.edit_message_text.call_args[0][0]
-    assert "EMYC Competition" in p_text
-    p_kb = query_to_p.edit_message_text.call_args[1]["reply_markup"]
-    p_btn_texts = [b.text for row in p_kb.inline_keyboard for b in row]
-    assert "⚙️ Admin Dashboard" in p_btn_texts
+    setup_kb = query_setup.edit_message_text.call_args[1]["reply_markup"]
+    setup_btn_texts = [b.text for row in setup_kb.inline_keyboard for b in row]
+    assert not any("Participant" in t for t in setup_btn_texts)
+    assert "⚙️ Competition Controls" in setup_btn_texts
 
 
 def test_human_readable_schedule_and_duration_formatters():

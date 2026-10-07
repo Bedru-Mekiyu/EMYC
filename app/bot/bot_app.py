@@ -35,7 +35,6 @@ from app.bot.handlers.admin import (
     cb_admin_competition,
     cb_admin_attach_standard_questions,
     cb_admin_setup_sample,
-    cb_admin_to_participant,
     cb_admin_set_status,
     cb_admin_results,
     cb_admin_submissions,
@@ -134,7 +133,6 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_archive, pattern="^admin:archive:"))
     app.add_handler(CallbackQueryHandler(cb_admin_attach_standard_questions, pattern="^admin:attach_std:"))
     app.add_handler(CallbackQueryHandler(cb_admin_setup_sample, pattern="^admin:setup_sample:"))
-    app.add_handler(CallbackQueryHandler(cb_admin_to_participant, pattern="^admin:to_participant$"))
     app.add_handler(CallbackQueryHandler(cb_admin_set_status, pattern="^admin:set_"))
     app.add_handler(CallbackQueryHandler(cb_admin_results, pattern="^admin:results$"))
     app.add_handler(CallbackQueryHandler(cb_admin_submissions, pattern="^admin:submissions:"))

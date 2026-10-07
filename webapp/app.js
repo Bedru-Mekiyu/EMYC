@@ -272,6 +272,14 @@
     applyStaticLocales();
     showView('loading');
 
+    // Extract and persist competition ID from URL query or Telegram start parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const compIdParam = urlParams.get('comp_id') || urlParams.get('tgWebAppStartParam');
+    if (compIdParam) {
+      sessionStorage.setItem('emyc_active_comp_id', compIdParam);
+    }
+    const activeCompId = compIdParam || sessionStorage.getItem('emyc_active_comp_id');
+
     // Standalone browser without Telegram initData and no saved web token
     if (!tg?.initData && !sessionStorage.getItem('emyc_web_token') && !window.location.search.includes('hash=')) {
       showWebLoginModal();
@@ -279,7 +287,12 @@
     }
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/webapp/session`, {
+      const sessionUrl = new URL(`${BACKEND_URL}/api/v1/webapp/session`);
+      if (activeCompId) {
+        sessionUrl.searchParams.set('comp_id', activeCompId);
+      }
+
+      const res = await fetch(sessionUrl.toString(), {
         method: 'GET',
         headers: getAuthHeaders(),
       });
@@ -302,7 +315,7 @@
 
       const data = await res.json();
 
-      if (data.status === 'not_live' || data.status === 'scheduled') {
+      if (data.status === 'not_live' || data.status === 'scheduled' || data.status === 'closed') {
         showError(t('not_live_title'), data.message || t('not_live_desc'), true, true);
         return;
       }
