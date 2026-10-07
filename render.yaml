@@ -6,7 +6,7 @@ services:
     dockerContext: .
     plan: starter
     healthCheckPath: /health
-    autoDeploy: false
+    autoDeploy: true
     envVars:
       - key: ENVIRONMENT
         value: production
