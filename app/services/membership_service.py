@@ -103,13 +103,25 @@ def get_membership_service() -> MembershipVerificationService:
 class ParticipantService:
     @staticmethod
     def validate_format(membership_id: str) -> str:
-        """Validates format of membership ID string without leaking internal regex rules."""
-        cleaned = membership_id.strip().upper()
-        if not re.match(settings.MEMBERSHIP_REGEX, cleaned):
-            raise InvalidMembershipFormatError(
-                "Membership verification could not be completed. Please check your official membership ID and try again."
-            )
-        return cleaned
+        """Validates format of membership ID string without leaking internal regex rules.
+        Automatically normalizes common human formatting variations in mock/dev mode.
+        """
+        cleaned = membership_id.strip().upper().replace(" ", "").replace("-", "/")
+        if re.match(settings.MEMBERSHIP_REGEX, cleaned):
+            return cleaned
+
+        # In mock adapter or non-strict mode, accept common variations (e.g. 12345 or EMYC12345)
+        if settings.MEMBERSHIP_ADAPTER_TYPE == "mock":
+            digits_match = re.search(r"(\d{4,10})", cleaned)
+            if digits_match:
+                digits = digits_match.group(1)
+                normalized = f"EMYC/{digits.zfill(7)}/2026"
+                if re.match(settings.MEMBERSHIP_REGEX, normalized):
+                    return normalized
+
+        raise InvalidMembershipFormatError(
+            "Membership verification could not be completed. Please check your official membership ID and try again."
+        )
 
     @staticmethod
     async def get_participant_by_telegram_id(

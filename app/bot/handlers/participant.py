@@ -463,7 +463,7 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles text messages (Membership ID input & Admin announcements)."""
     user = update.effective_user
-    if not user:
+    if not user or not update.message or not update.message.text:
         return
 
     lang = await get_user_lang(user.id)

@@ -102,3 +102,18 @@ async def recent_errors_check():
         "errors": list(RECENT_ERRORS),
     }
 
+
+@router.post("/run-migrations")
+@router.get("/run-migrations")
+async def execute_migrations():
+    """Idempotent endpoint to verify and apply missing database schema columns."""
+    from app.core.database import engine
+    from sqlalchemy import text
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS answers_summary JSONB;"))
+            await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS question_sequence JSONB;"))
+        return {"status": "success", "message": "Database schema columns migrated successfully."}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+

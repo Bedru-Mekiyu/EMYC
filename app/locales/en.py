@@ -52,7 +52,13 @@ MESSAGES = {
     "reg_share_phone_prompt": "Please share your phone number to complete registration.",
     "reg_share_phone_btn": "📱 Share Phone Number",
     "reg_phone_rejected_not_owner": "⚠️ Please share your own phone number using the button below.",
-    "reg_complete": "✅ Registration complete.\n\nWelcome to EMYC Competition.",
+    "reg_complete": (
+        "╔═══════════════════════════════╗\n"
+        "║  🇪🇹 *OFFICIAL EMYC CONTESTANT PASS* 🇪🇹  ║\n"
+        "╚═══════════════════════════════╝\n\n"
+        "✅ *Verification Successful!*\n\n"
+        "Your official contestant credentials have been authenticated. You are fully accredited to participate in all EMYC examinations."
+    ),
     "reg_already_registered": "✅ You are already registered with EMYC Membership `{membership_id}`.",
     "competition_not_open": "⏳ *The competition is not open yet.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 This competition has closed.",

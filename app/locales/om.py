@@ -51,7 +51,13 @@ MESSAGES = {
     "reg_share_phone_prompt": "Galmee xumuruuf mee lakkoofsa bilbilaa keessan qoodaa.",
     "reg_share_phone_btn": "📱 Lakkoofsa Bilbilaa Qoodaa",
     "reg_phone_rejected_not_owner": "⚠️ Mee qabduu gadii fayyadamuun lakkoofsa bilbila keessanii qoodaa.",
-    "reg_complete": "✅ Galmeen xumurameera.\n\nBaga gara dorgommii EMYC tti dhuftan.",
+    "reg_complete": (
+        "╔═══════════════════════════════╗\n"
+        "║  🇪🇹 *WARAQAA HIRMAATAA EMYC* 🇪🇹  ║\n"
+        "╚═══════════════════════════════╝\n\n"
+        "✅ *Galmeen Milkaa'inaan Xumurameera!*\n\n"
+        "Eenyummaan keessan mirkanaa'eera. Qormaata EMYC hunda irratti hirmaachuuf hayyama qabdu."
+    ),
     "reg_already_registered": "✅ Eenyummeessaa miseensummaa EMYC `{membership_id}` duraan galmooftaniittu.",
     "competition_not_open": "⏳ *Dorgommiin ammatti hin banamne.*\n\n{schedule}\n{details}",
     "competition_closed": "🚫 Dorgommiin kun cufameera.",

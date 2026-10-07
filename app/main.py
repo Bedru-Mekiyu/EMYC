@@ -19,6 +19,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up Telegram Competitive Exam Platform backend...")
     logger.info(f"Environment: {settings.ENVIRONMENT}, Bot Mode: {settings.BOT_MODE}")
 
+    # Automatic database schema migration for missing columns
+    try:
+        from app.core.database import engine
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS answers_summary JSONB;"))
+            await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS question_sequence JSONB;"))
+        logger.info("Database schema migration: verified exam_attempts JSONB columns exist.")
+    except Exception as e:
+        logger.error(f"Error during database schema migration: {e}", exc_info=True)
+
     # Launch background deadline sweeper
     sweeper_task = asyncio.create_task(start_periodic_sweeper(interval_seconds=30))
 
