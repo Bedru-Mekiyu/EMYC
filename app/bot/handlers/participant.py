@@ -96,7 +96,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings()
 
     # If user is an administrator and sent /start command, open Admin Dashboard directly
-    if update.message and settings.is_admin(user.id):
+    # UNLESS they are explicitly testing in candidate preview mode
+    if update.message and settings.is_admin(user.id) and not context.user_data.get("admin_candidate_preview"):
         from app.bot.handlers.admin import cmd_admin
         await cmd_admin(update, context)
         return
@@ -416,9 +417,23 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         async with AsyncSessionLocal() as db:
             participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
 
-            # 1. Unregistered -> Check if registration in progress or prompt for Membership ID
+            # 1. Unregistered -> Check if admin testing, registration in progress, or prompt for Membership ID
             if not participant:
-                reg_data = context.user_data.get("registration")
+                from app.core.config import get_settings
+                if get_settings().is_admin(user.id):
+                    participant = Participant(
+                        telegram_user_id=user.id,
+                        telegram_username=user.username or "admin_tester",
+                        full_name=user.full_name or "Admin Test Candidate",
+                        phone_number="+251900000000",
+                        membership_id=f"ADMIN-{user.id}",
+                        is_active=True,
+                    )
+                    db.add(participant)
+                    await db.commit()
+                    await db.refresh(participant)
+                else:
+                    reg_data = context.user_data.get("registration")
                 if reg_data:
                     step = reg_data.get("step")
                     if step == "phone":

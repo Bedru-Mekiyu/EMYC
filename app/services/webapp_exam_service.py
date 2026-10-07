@@ -47,10 +47,24 @@ class WebAppExamService:
         p_res = await db.execute(part_stmt)
         participant = p_res.scalar_one_or_none()
         if not participant:
-            return {
-                "status": "unregistered",
-                "message": "Participant must verify membership and register first.",
-            }
+            from app.core.config import get_settings
+            if get_settings().is_admin(telegram_user_id):
+                participant = Participant(
+                    telegram_user_id=telegram_user_id,
+                    telegram_username="admin_tester",
+                    full_name="Admin Test Candidate",
+                    phone_number="+251900000000",
+                    membership_id=f"ADMIN-{telegram_user_id}",
+                    is_active=True,
+                )
+                db.add(participant)
+                await db.commit()
+                await db.refresh(participant)
+            else:
+                return {
+                    "status": "unregistered",
+                    "message": "Participant must verify membership and register first.",
+                }
 
         # 2. Check for LIVE competition
         comp = await CompetitionService.get_active_competition(db)

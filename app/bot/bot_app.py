@@ -38,6 +38,7 @@ from app.bot.handlers.admin import (
     cb_admin_to_participant,
     cb_admin_set_status,
     cb_admin_results,
+    cb_admin_submissions,
     cb_admin_finalize,
     cb_admin_publish,
     cb_admin_announce,
@@ -136,6 +137,7 @@ def build_application(token: Optional[str] = None) -> Application:
     app.add_handler(CallbackQueryHandler(cb_admin_to_participant, pattern="^admin:to_participant$"))
     app.add_handler(CallbackQueryHandler(cb_admin_set_status, pattern="^admin:set_"))
     app.add_handler(CallbackQueryHandler(cb_admin_results, pattern="^admin:results$"))
+    app.add_handler(CallbackQueryHandler(cb_admin_submissions, pattern="^admin:submissions:"))
     app.add_handler(CallbackQueryHandler(cb_admin_finalize, pattern="^admin:finalize:"))
     app.add_handler(CallbackQueryHandler(cb_admin_publish, pattern="^admin:publish:"))
     app.add_handler(CallbackQueryHandler(cb_admin_export_results, pattern="^admin:export_results:"))

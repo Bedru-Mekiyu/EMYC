@@ -89,6 +89,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("pending_announcement", None)
     context.user_data.pop("create_comp", None)
     context.user_data.pop("q_wizard", None)
+    context.user_data.pop("admin_candidate_preview", None)
 
     user = update.effective_user
     user_id = user.id if user else 0
@@ -109,20 +110,26 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Total registered participants (excluding administrators)
         total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        # Attempt metrics for this competition (excluding administrators)
+        # Attempt metrics for this competition
         started = 0
         submitted = 0
         in_progress = 0
         if comp:
             attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
+            all_attempts = list((await db.execute(attempts_stmt)).scalars().all())
             admin_ids = get_settings().admin_ids
             if admin_ids:
                 admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
-                attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
-            attempts = list((await db.execute(attempts_stmt)).scalars().all())
-            started = len(attempts)
-            submitted = sum(1 for a in attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
-            in_progress = sum(1 for a in attempts if a.status == AttemptStatus.IN_PROGRESS)
+                cand_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+                cand_attempts = list((await db.execute(cand_stmt)).scalars().all())
+            else:
+                cand_attempts = all_attempts
+
+            # Prefer candidate attempts; fallback to test attempts so admin can verify submissions
+            active_attempts = cand_attempts if len(cand_attempts) > 0 else all_attempts
+            started = len(active_attempts)
+            submitted = sum(1 for a in active_attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
+            in_progress = sum(1 for a in active_attempts if a.status == AttemptStatus.IN_PROGRESS)
 
     text = get_text(
         "admin_menu_title",
@@ -583,6 +590,23 @@ async def cb_admin_to_participant(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer("Switching to Participant View...", show_alert=False)
     user = update.effective_user
+    context.user_data["admin_candidate_preview"] = True
+
+    # Ensure admin has a participant record for testing
+    async with AsyncSessionLocal() as db:
+        p = await ParticipantService.get_participant_by_telegram_id(db, user.id)
+        if not p:
+            p = Participant(
+                telegram_user_id=user.id,
+                telegram_username=user.username or "admin_tester",
+                full_name=user.full_name or "Admin Test Candidate",
+                phone_number="+251900000000",
+                membership_id=f"ADMIN-{user.id}",
+                is_active=True,
+            )
+            db.add(p)
+            await db.commit()
+
     from app.bot.handlers.participant import get_user_lang, get_participant_display_name
     lang = await get_user_lang(user.id)
     name = get_participant_display_name(update)
@@ -708,7 +732,7 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         admin_ids = get_settings().admin_ids
         admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
 
-        agg_stmt = select(
+        base_agg_stmt = select(
             func.count(ExamAttempt.id).label("started"),
             func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("completed"),
             func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))).label("in_progress"),
@@ -717,14 +741,27 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ).where(ExamAttempt.competition_id == comp.id)
 
         if admin_p_sub is not None:
-            agg_stmt = agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+            cand_agg_stmt = base_agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+            agg_res = (await db.execute(cand_agg_stmt)).one()
+        else:
+            agg_res = (await db.execute(base_agg_stmt)).one()
 
-        agg_res = (await db.execute(agg_stmt)).one()
         started = agg_res.started or 0
         submitted = agg_res.completed or 0
         in_progress = agg_res.in_progress or 0
         expired = agg_res.expired or 0
         highest_score = agg_res.highest_score
+
+        is_test_mode = False
+        if started == 0 and admin_p_sub is not None:
+            all_agg_res = (await db.execute(base_agg_stmt)).one()
+            if (all_agg_res.started or 0) > 0:
+                started = all_agg_res.started or 0
+                submitted = all_agg_res.completed or 0
+                in_progress = all_agg_res.in_progress or 0
+                expired = all_agg_res.expired or 0
+                highest_score = all_agg_res.highest_score
+                is_test_mode = True
 
         completion_pct = round((submitted / started) * 100, 1) if started > 0 else 0.0
         top_score_val = f"{highest_score}/{comp.question_count}" if highest_score is not None else "N/A"
@@ -742,6 +779,8 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         top_score=top_score_val,
         status=format_competition_status(comp.status),
     )
+    if is_test_mode:
+        dash_text += "\n\n🧪 _(Displaying Admin Test Simulation Data)_"
 
     await query.edit_message_text(
         dash_text,
@@ -1079,16 +1118,24 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             .where(ExamAttempt.competition_id == comp.id)
         )
         admin_ids = get_settings().admin_ids
+        cand_stmt = attempts_stmt
         if admin_ids:
             admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
-            attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+            cand_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
 
-        attempts_stmt = attempts_stmt.order_by(
+        order_clauses = [
             ExamAttempt.rank.asc().nulls_last(),
             ExamAttempt.score.desc().nulls_last(),
             ExamAttempt.completion_seconds.asc().nulls_last(),
-        ).limit(5)
-        attempts = list((await db.execute(attempts_stmt)).scalars().all())
+        ]
+        attempts = list((await db.execute(cand_stmt.order_by(*order_clauses).limit(5))).scalars().all())
+        is_test_mode = False
+
+        if not attempts:
+            test_attempts = list((await db.execute(attempts_stmt.order_by(*order_clauses).limit(5))).scalars().all())
+            if test_attempts:
+                attempts = test_attempts
+                is_test_mode = True
 
     status_tag = format_competition_status(comp.status)
     if not attempts:
@@ -1099,8 +1146,9 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         body = "_No participant attempts recorded yet._"
     else:
         top_count = len(attempts)
+        test_tag = " 🧪 *(Admin Test Simulation)*" if is_test_mode else ""
         header = (
-            f"🏅 *EMYC Competition Leaderboard*\n\n"
+            f"🏅 *EMYC Competition Leaderboard*{test_tag}\n\n"
             f"*Competition:* {comp.title} ({status_tag})\n"
             f"🏆 *Top {top_count} Performers:*\n\n"
         )
@@ -1112,6 +1160,8 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             p_name = "Participant"
             if att.participant:
                 p_name = att.participant.telegram_username or att.participant.membership_id
+            if is_test_mode:
+                p_name += " [Test]"
 
             score_val = att.score if att.score is not None else "Pending"
             mins, secs = divmod(int(att.completion_seconds or 0), 60)
@@ -1125,6 +1175,78 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup=get_admin_rankings_keyboard("en", comp_id=comp.id),
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+@require_admin
+async def cb_admin_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the list of recent exam attempts/submissions with detailed scores and timestamps."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")
+    comp_id = uuid.UUID(parts[2])
+
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, comp_id)
+        if not comp:
+            await query.edit_message_text("ℹ️ Competition not found.", reply_markup=get_admin_keyboard("en"))
+            return
+
+        stmt = (
+            select(ExamAttempt)
+            .options(selectinload(ExamAttempt.participant))
+            .where(ExamAttempt.competition_id == comp_id)
+            .order_by(ExamAttempt.created_at.desc())
+            .limit(10)
+        )
+        attempts = list((await db.execute(stmt)).scalars().all())
+
+    status_tag = format_competition_status(comp.status)
+    header = (
+        f"📋 *Recent Submissions & Attempts*\n\n"
+        f"• *Competition:* {comp.title} ({status_tag})\n"
+        f"• *Total Shown:* {len(attempts)}\n\n"
+    )
+
+    if not attempts:
+        body = "_No submissions or exam attempts recorded yet._"
+    else:
+        status_badges = {
+            AttemptStatus.SUBMITTED: "✅ Submitted",
+            AttemptStatus.IN_PROGRESS: "⏳ In Progress",
+            AttemptStatus.FINALIZED: "🏁 Finalized",
+            AttemptStatus.EXPIRED: "⌛ Expired",
+        }
+        lines = []
+        admin_ids = get_settings().admin_ids
+        for idx, att in enumerate(attempts, start=1):
+            p = att.participant
+            p_tg_id = p.telegram_user_id if p else None
+            is_admin_att = (p_tg_id in admin_ids) if (p_tg_id and admin_ids) else False
+
+            p_display = (p.full_name or p.telegram_username or f"ID:{p.membership_id}") if p else "Unknown"
+            if is_admin_att:
+                p_display += " [Admin/Test]"
+
+            status_str = status_badges.get(att.status, str(att.status.value if hasattr(att.status, "value") else att.status))
+            score_str = f"{att.score}/{comp.question_count}" if att.score is not None else "--"
+            mins, secs = divmod(int(att.completion_seconds or 0), 60)
+            dur_str = f"{mins:02d}:{secs:02d}" if att.completion_seconds else "--:--"
+
+            lines.append(f"*{idx}.* `{p_display}`\n   • Status: {status_str} | Score: *{score_str}* ({dur_str})")
+        body = "\n\n".join(lines)
+
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📊 Results Dashboard", callback_data="admin:results"),
+            InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Refresh", callback_data=f"admin:submissions:{comp_id}"),
+            InlineKeyboardButton("◀️ Admin Menu", callback_data="admin:home"),
+        ],
+    ])
+
+    await query.edit_message_text(f"{header}{body}", reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
 
 @require_admin

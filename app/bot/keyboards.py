@@ -238,17 +238,28 @@ def get_answer_review_nav_keyboard(
 
 
 def get_admin_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    """Main administrative control panel keyboard with strictly 3 actions:
-    1. 🏆 Competition
-    2. 📢 Announcement
-    3. 🌐 Language
+    """Main administrative control panel keyboard with direct Mini App test launch,
+    candidate simulation mode, and competition/results controls.
     """
-    keyboard = [
-        [InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition")],
-        [InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce")],
-        [InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    from app.core.config import get_settings
+    settings = get_settings()
+    webapp_url = getattr(settings, "WEBAPP_URL", None)
+
+    rows = []
+    if webapp_url:
+        from telegram import WebAppInfo
+        rows.append([InlineKeyboardButton("🚀 Launch Exam (Mini App)", web_app=WebAppInfo(url=webapp_url))])
+
+    rows.append([InlineKeyboardButton("👤 Test as Candidate / ተሳታፊ", callback_data="admin:to_participant")])
+    rows.append([
+        InlineKeyboardButton(get_text("admin_btn_competition", lang), callback_data="admin:competition"),
+        InlineKeyboardButton("📊 Results", callback_data="admin:results"),
+    ])
+    rows.append([
+        InlineKeyboardButton(get_text("admin_btn_announce", lang), callback_data="admin:announce"),
+        InlineKeyboardButton(get_text("admin_btn_lang", lang), callback_data="admin:lang"),
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 def get_admin_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
@@ -291,7 +302,10 @@ def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[s
     """Consolidated operational results dashboard keyboard."""
     rows = []
     if comp_id:
-        rows.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
+        rows.append([
+            InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings"),
+            InlineKeyboardButton("📋 Submissions", callback_data=f"admin:submissions:{comp_id}"),
+        ])
         if status in ["CLOSED", "RESULTS_FINALIZED", "PUBLISHED", "ARCHIVED"]:
             rows.append([InlineKeyboardButton(get_text("admin_btn_export_csv", lang), callback_data=f"admin:export_results:{comp_id}")])
         if status == "CLOSED":
@@ -303,6 +317,7 @@ def get_admin_results_keyboard(comp_id: Optional[Any] = None, status: Optional[s
         InlineKeyboardButton(get_text("admin_btn_refresh", lang), callback_data="admin:results"),
         InlineKeyboardButton("◀️ Competition", callback_data="admin:competition"),
     ])
+    rows.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
     return InlineKeyboardMarkup(rows)
 
 
