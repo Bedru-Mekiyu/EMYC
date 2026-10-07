@@ -102,7 +102,7 @@ MESSAGES = {
     "unauthorized_admin": "⛔ ያልተፈቀደ መዳረሻ።",
     "admin_menu_title": (
         "🏆 *የኢ.ሙ.ወ.ም ውድድር አስተዳዳሪ*\n\n"
-        "*ያለው ውድድር:* {title} [{status}]\n"
+        "*ያለው ውድድር:* {title} ({status})\n"
         "👥 *የተመዘገቡ ተሳታፊዎች:* {registered_count}\n"
         "▶️ *የጀመሩ:* {started_count}\n"
         "⏳ *በሂደት ላይ:* {in_progress_count}\n"

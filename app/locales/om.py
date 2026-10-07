@@ -101,7 +101,7 @@ MESSAGES = {
     "unauthorized_admin": "⛔ Hayyama hin qabdan.",
     "admin_menu_title": (
         "🏆 *Bulchiinsa Dorgommii EMYC*\n\n"
-        "*Dorgommii Ammaa:* {title} [{status}]\n"
+        "*Dorgommii Ammaa:* {title} ({status})\n"
         "👥 *Hirmaattota Galmaa'an:* {registered_count}\n"
         "▶️ *Jalqaban:* {started_count}\n"
         "⏳ *Adeemsarra:* {in_progress_count}\n"

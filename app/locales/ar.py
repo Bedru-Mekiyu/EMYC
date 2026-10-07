@@ -102,7 +102,7 @@ MESSAGES = {
     "unauthorized_admin": "⛔ وصول غير مصرح به.",
     "admin_menu_title": (
         "🏆 *إدارة مسابقات EMYC*\n\n"
-        "*المسابقة الحالية:* {title} [{status}]\n"
+        "*المسابقة الحالية:* {title} ({status})\n"
         "👥 *المشاركون المسجلون:* {registered_count}\n"
         "▶️ *المحاولات المبدوءة:* {started_count}\n"
         "⏳ *قيد الاختبار:* {in_progress_count}\n"

@@ -136,11 +136,22 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     keyboard = get_admin_keyboard(lang)
 
-    if update.message:
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    elif update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    try:
+        if update.message:
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        elif update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.warning(f"Error sending admin menu with markdown: {e}")
+        plain = text.replace("*", "").replace("_", "").replace("`", "")
+        try:
+            if update.message:
+                await update.message.reply_text(plain, reply_markup=keyboard)
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(plain, reply_markup=keyboard)
+        except Exception as e2:
+            logger.error(f"Failed delivering fallback admin menu: {e2}")
 
 
 @require_admin

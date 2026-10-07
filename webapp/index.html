@@ -23,9 +23,20 @@
         <p id="lbl-participant">Student</p>
       </div>
     </div>
-    <div id="timer-box" class="timer-badge">
-      <span>⏱️</span>
-      <span id="timer-text">--:--</span>
+    <div class="header-controls">
+      <!-- Audio Mute Toggle -->
+      <button id="btn-sound-toggle" class="btn-icon" title="Toggle Sound">🔊</button>
+      <!-- Font Scale Toggle -->
+      <button id="btn-font-toggle" class="btn-icon" title="Adjust Text Size">A±</button>
+      <!-- Language Picker -->
+      <button id="btn-lang-picker" class="btn-pill">
+        <span>🌐</span> <span id="lbl-current-lang">EN</span>
+      </button>
+      <!-- Live Timer Badge -->
+      <div id="timer-box" class="timer-badge">
+        <span>⏱️</span>
+        <span id="timer-text">--:--</span>
+      </div>
     </div>
   </header>
 
@@ -38,6 +49,34 @@
   <div id="view-loading" class="status-screen">
     <div class="spinner"></div>
     <h3 id="lbl-loading">Loading examination session...</h3>
+  </div>
+
+  <!-- Pre-Exam Instructions & Readiness View -->
+  <div id="view-instructions" class="status-screen" style="display: none;">
+    <div style="font-size: 52px; margin-bottom: 12px;">📋</div>
+    <h2 id="lbl-instr-title">Examination Instructions</h2>
+    <p id="lbl-instr-desc">Please review the rules below before starting your examination session.</p>
+    
+    <div class="instructions-card">
+      <div class="instr-row">
+        <span>📝 <b id="lbl-rule-q-label">Total Questions:</b></span>
+        <span id="instr-total-q" class="badge-emerald">100</span>
+      </div>
+      <div class="instr-row">
+        <span>⏱️ <b id="lbl-rule-time-label">Duration:</b></span>
+        <span id="instr-duration" class="badge-gold">60 mins</span>
+      </div>
+      <div class="instr-divider"></div>
+      <div class="instr-rules-list">
+        <div class="rule-item">✅ <span id="lbl-rule-1">1 point per correct answer. Zero penalty for incorrect.</span></div>
+        <div class="rule-item">💾 <span id="lbl-rule-2">All answers are saved locally in real-time on your phone.</span></div>
+        <div class="rule-item">⏰ <span id="lbl-rule-3">Exam will auto-submit when countdown timer reaches zero.</span></div>
+      </div>
+    </div>
+
+    <button id="btn-start-exam-now" class="btn btn-primary btn-large" style="width: 100%;">
+      <span id="lbl-start-exam-now">Begin Examination Now 🚀</span>
+    </button>
   </div>
 
   <!-- Exam Main Interface -->
@@ -95,6 +134,11 @@
         <div id="tab-filter-unans" class="filter-tab">Unanswered (<span id="count-unans">100</span>)</div>
         <div id="tab-filter-flagged" class="filter-tab">Flagged (<span id="count-flagged">0</span>)</div>
       </div>
+      <!-- Quick Jump Jumpers -->
+      <div class="quick-jump-row">
+        <button id="btn-jump-first-unans" class="btn-jump-pill">⚠️ <span id="lbl-jump-unans">Jump to Unanswered</span></button>
+        <button id="btn-jump-first-flagged" class="btn-jump-pill">🚩 <span id="lbl-jump-flagged">Jump to Flagged</span></button>
+      </div>
       <div class="grid-legend">
         <div class="legend-item"><span class="legend-dot answered"></span> <span id="lbl-legend-ans">Answered</span></div>
         <div class="legend-item"><span class="legend-dot unanswered"></span> <span id="lbl-legend-unans">Unanswered</span></div>
@@ -110,6 +154,46 @@
     </div>
   </div>
 
+  <!-- Language Selection Modal -->
+  <div id="modal-lang" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="lbl-lang-modal-title">Select Language / ቋንቋ ይምረጡ</h3>
+        <button id="btn-close-lang" class="btn btn-secondary" style="padding: 6px 12px;">✕</button>
+      </div>
+      <div class="lang-grid">
+        <div class="lang-choice-card" data-lang="en">
+          <span class="lang-flag">🇬🇧</span>
+          <div class="lang-text">
+            <b>English</b>
+            <small>Default</small>
+          </div>
+        </div>
+        <div class="lang-choice-card" data-lang="am">
+          <span class="lang-flag">🇪🇹</span>
+          <div class="lang-text">
+            <b>አማርኛ</b>
+            <small>Amharic</small>
+          </div>
+        </div>
+        <div class="lang-choice-card" data-lang="om">
+          <span class="lang-flag">🌳</span>
+          <div class="lang-text">
+            <b>Afaan Oromoo</b>
+            <small>Oromo</small>
+          </div>
+        </div>
+        <div class="lang-choice-card" data-lang="ar">
+          <span class="lang-flag">🇸🇦</span>
+          <div class="lang-text">
+            <b>العربية</b>
+            <small>Arabic</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Final Submission Confirmation Modal -->
   <div id="modal-confirm" class="modal-overlay">
     <div class="modal-card">
@@ -120,6 +204,23 @@
       <p id="lbl-confirm-msg" style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">
         Are you sure you want to finalize your exam? Once submitted, your answers cannot be changed.
       </p>
+      
+      <!-- Submission Stats Drawer -->
+      <div class="confirm-stats-card">
+        <div class="confirm-stat-item">
+          <span class="stat-num text-emerald" id="confirm-stat-answered">0</span>
+          <span class="stat-lbl" id="lbl-confirm-ans-lbl">Answered</span>
+        </div>
+        <div class="confirm-stat-item">
+          <span class="stat-num text-danger" id="confirm-stat-unanswered">0</span>
+          <span class="stat-lbl" id="lbl-confirm-unans-lbl">Unanswered</span>
+        </div>
+        <div class="confirm-stat-item">
+          <span class="stat-num text-gold" id="confirm-stat-flagged">0</span>
+          <span class="stat-lbl" id="lbl-confirm-flag-lbl">Flagged</span>
+        </div>
+      </div>
+
       <div id="confirm-warning-box" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); padding: 12px; border-radius: 12px; color: #ef4444; font-size: 13px; font-weight: 600; margin-bottom: 20px;">
         ⚠️ Warning: You have unanswered questions.
       </div>
@@ -155,9 +256,14 @@
     <p id="lbl-result-msg" style="color: var(--text-secondary); font-size: 13px;">
       Your answers have been securely recorded. Official ranks and certificates will be released when the competition closes.
     </p>
-    <button id="btn-exit" class="btn btn-primary" style="width: 100%;">
-      Exit to Telegram
-    </button>
+    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+      <button id="btn-practice-again" class="btn btn-secondary" style="display: none;">
+        🎯 Try Another Practice Test
+      </button>
+      <button id="btn-exit" class="btn btn-primary" style="width: 100%;">
+        Exit to Telegram
+      </button>
+    </div>
   </div>
 
   <!-- Error / Status Screen -->
@@ -165,7 +271,12 @@
     <div style="font-size: 48px;" id="error-icon">⚠️</div>
     <h2 id="error-title">Notice</h2>
     <p id="error-desc">An error occurred.</p>
-    <button id="btn-error-action" class="btn btn-primary">Try Again</button>
+    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; margin: 0 auto;">
+      <button id="btn-practice-trigger" class="btn btn-accent" style="width: 100%;">
+        🎯 Try Practice Exam
+      </button>
+      <button id="btn-error-action" class="btn btn-primary" style="width: 100%;">Try Again</button>
+    </div>
   </div>
 
   <!-- Scripts -->

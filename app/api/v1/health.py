@@ -92,3 +92,13 @@ async def bot_status_check(db: AsyncSession = Depends(get_db)):
         "telegram_webhook_info": webhook_info_dict,
     }
 
+
+@router.get("/recent-errors")
+async def recent_errors_check():
+    """Returns in-memory capture of recent server and bot errors for instant diagnostics."""
+    from app.core.logging import RECENT_ERRORS
+    return {
+        "count": len(RECENT_ERRORS),
+        "errors": list(RECENT_ERRORS),
+    }
+

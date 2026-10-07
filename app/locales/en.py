@@ -102,7 +102,7 @@ MESSAGES = {
     "unauthorized_admin": "⛔ Unauthorized access.",
     "admin_menu_title": (
         "🏆 *EMYC Competition Admin*\n\n"
-        "*Active Competition:* {title} [{status}]\n"
+        "*Active Competition:* {title} ({status})\n"
         "👥 *Registered Participants:* {registered_count}\n"
         "▶️ *Started Attempts:* {started_count}\n"
         "⏳ *In Progress:* {in_progress_count}\n"
