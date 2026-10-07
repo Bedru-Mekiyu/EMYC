@@ -333,14 +333,14 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
                 buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
             buttons.append([InlineKeyboardButton("✏️ Edit Schedule Window", callback_data=f"admin:edit_sched:{comp.id}")])
             if comp.status == CompetitionStatus.OPEN:
-                buttons.append([InlineKeyboardButton("⏹ Close Competition", callback_data=f"admin:set_closed:{comp.id}")])
+                buttons.append([InlineKeyboardButton("🛑 Stop Competition (Close Session)", callback_data=f"admin:set_closed:{comp.id}")])
             buttons.append([InlineKeyboardButton("📦 Archive Competition", callback_data=f"admin:archive:{comp.id}")])
 
         elif comp.status == CompetitionStatus.LIVE:
+            buttons.append([InlineKeyboardButton("🛑 Stop Competition (Close Session)", callback_data=f"admin:set_closed:{comp.id}")])
             buttons.append([InlineKeyboardButton("✏️ Extend / Edit Open Window", callback_data=f"admin:edit_sched:{comp.id}")])
-            buttons.append([InlineKeyboardButton("⏹ Close Competition", callback_data=f"admin:set_closed:{comp.id}")])
-            buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
             buttons.append([InlineKeyboardButton("📊 View Results", callback_data="admin:results")])
+            buttons.append([InlineKeyboardButton("🏅 View Rankings", callback_data="admin:rankings")])
 
         elif comp.status == CompetitionStatus.CLOSED:
             buttons.append([InlineKeyboardButton("📊 Finalize Scores & Rankings", callback_data=f"admin:finalize:{comp.id}")])

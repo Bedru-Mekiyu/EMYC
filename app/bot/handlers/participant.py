@@ -347,7 +347,7 @@ async def render_competition_state_for_participant(
         attempt = (await db.execute(stmt)).scalars().first()
 
         if attempt:
-            # If in progress, check deadline and resume where they left off (first unanswered question)
+            # If in progress, check deadline and resume in Mini App
             if attempt.status == AttemptStatus.IN_PROGRESS:
                 if now_utc() > ensure_utc(attempt.deadline_at):
                     await CompetitionService.auto_submit_expired_attempt(db, attempt)
@@ -355,22 +355,20 @@ async def render_competition_state_for_participant(
                     kb = InlineKeyboardMarkup([[InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")]])
                     await _send_or_edit(target, text, reply_markup=kb)
                     return
-                ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == attempt.id)
-                ans_ids = set((await db.execute(ans_stmt)).scalars().all())
-
-                order_stmt = (
-                    select(AttemptQuestionOrder.display_order)
-                    .where(
-                        and_(
-                            AttemptQuestionOrder.attempt_id == attempt.id,
-                            ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
-                        )
-                    )
-                    .order_by(AttemptQuestionOrder.display_order.asc())
-                    .limit(1)
+                from app.core.config import get_settings
+                from telegram import WebAppInfo
+                webapp_url = getattr(get_settings(), "WEBAPP_URL", "https://emyc-exam.pages.dev")
+                text = (
+                    "🚀 *Examination in Progress*\n\n"
+                    f"• *Competition:* {comp.title}\n"
+                    f"• *Status:* Active Exam Session\n\n"
+                    "Tap below to continue taking your examination in the Mini App:"
                 )
-                first_unanswered = (await db.execute(order_stmt)).scalar() or 1
-                await render_question_screen(target, attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
+                kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 Continue Exam (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+                    [InlineKeyboardButton(get_text("back_to_menu_btn", lang), callback_data="menu:home")],
+                ])
+                await _send_or_edit(target, text, reply_markup=kb)
                 return
 
             # If already submitted / finished:
@@ -956,67 +954,27 @@ async def handle_contact_message(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Starts the exam attempt and presents question 1."""
+    """Redirects participant to the high-throughput Mini App."""
     query = update.callback_query
     await query.answer()
     user = update.effective_user
     lang = await get_user_lang(user.id)
-    comp_id = uuid.UUID(query.data.split(":")[2])
 
-    async with AsyncSessionLocal() as db:
-        participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
-        if not participant:
-            await query.edit_message_text(get_text("membership_prompt", lang), parse_mode=ParseMode.MARKDOWN)
-            return
+    from app.core.config import get_settings
+    from telegram import WebAppInfo
+    webapp_url = getattr(get_settings(), "WEBAPP_URL", "https://emyc-exam.pages.dev")
 
-        try:
-            attempt = await CompetitionService.start_attempt(db, comp_id, participant.id)
-            await render_question_screen(query, attempt.id, display_order=1, lang=lang, participant_id=participant.id)
-        except DuplicateAttemptError:
-            # Check existing attempt: if IN_PROGRESS, resume it directly!
-            stmt = (
-                select(ExamAttempt)
-                .where(
-                    and_(
-                        ExamAttempt.competition_id == comp_id,
-                        ExamAttempt.participant_id == participant.id,
-                    )
-                )
-                .order_by(ExamAttempt.started_at.desc())
-                .limit(1)
-            )
-            existing_attempt = (await db.execute(stmt)).scalars().first()
-
-            if existing_attempt and existing_attempt.status == AttemptStatus.IN_PROGRESS:
-                ans_stmt = select(ParticipantAnswer.question_id).where(ParticipantAnswer.attempt_id == existing_attempt.id)
-                ans_ids = set((await db.execute(ans_stmt)).scalars().all())
-
-                order_stmt = (
-                    select(AttemptQuestionOrder.display_order)
-                    .where(
-                        and_(
-                            AttemptQuestionOrder.attempt_id == existing_attempt.id,
-                            ~AttemptQuestionOrder.question_id.in_(ans_ids) if ans_ids else True,
-                        )
-                    )
-                    .order_by(AttemptQuestionOrder.display_order.asc())
-                    .limit(1)
-                )
-                first_unanswered = (await db.execute(order_stmt)).scalar() or 1
-                await render_question_screen(query, existing_attempt.id, display_order=first_unanswered, lang=lang, participant_id=participant.id)
-                return
-
-            await query.edit_message_text(get_text("already_submitted", lang), reply_markup=get_main_menu_keyboard(lang))
-        except CompetitionNotOpenError as e:
-            logger.info(f"Exam start attempted when competition not open: {e}")
-            await _send_or_edit(
-                query,
-                get_text("competition_not_open", lang, title="EMYC Competition", schedule="", details="", opens_at="Soon", closes_at=""),
-                reply_markup=get_main_menu_keyboard(lang),
-            )
-        except Exception as e:
-            logger.error(f"Error starting exam: {e}", exc_info=True)
-            await _send_or_edit(query, get_text("error_generic_retry", lang), reply_markup=get_main_menu_keyboard(lang))
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
+    ])
+    await query.edit_message_text(
+        "🚀 *EMYC Competitive Examination*\n\n"
+        "Please tap the button below to launch the Mini App. The examination features real-time countdown timers, "
+        "smooth question navigation, and offline progress protection.",
+        reply_markup=kb,
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 async def render_question_screen(

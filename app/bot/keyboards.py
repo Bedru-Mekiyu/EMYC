@@ -10,13 +10,22 @@ def get_main_menu_keyboard(
     published_comp_id: Optional[uuid.UUID] = None,
 ) -> InlineKeyboardMarkup:
     """Participant main menu keyboard providing:
-    1. 🌐 Change Language
-    2. 🏆 Competition
-    3. ⚙️ Admin Dashboard (if user is admin)
+    1. 🚀 Launch Exam (Mini App)
+    2. 🏆 Competition Details
+    3. 🌐 Change Language
+    4. ⚙️ Admin Dashboard (if user is admin)
     """
+    from app.core.config import get_settings
+    from telegram import WebAppInfo
+    settings = get_settings()
+    webapp_url = getattr(settings, "WEBAPP_URL", "https://emyc-exam.pages.dev")
+
     rows = [
-        [InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang")],
-        [InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start")],
+        [InlineKeyboardButton("🚀 Launch Exam (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+        [
+            InlineKeyboardButton(get_text("start_btn", lang), callback_data="menu:start"),
+            InlineKeyboardButton(get_text("change_lang_btn", lang), callback_data="menu:lang"),
+        ],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Admin Dashboard", callback_data="admin:home")])
@@ -62,22 +71,17 @@ def get_language_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
 
 def get_start_exam_keyboard(competition_id: uuid.UUID, lang: str = "en") -> InlineKeyboardMarkup:
     """Confirmation to launch competition attempt.
-    If WEBAPP_URL is configured, provides a high-throughput Telegram Mini App button
-    alongside the standard Telegram chat option.
+    Mandatory Telegram Mini App button ensuring zero Telegram message rate-limit collisions.
     """
     from app.core.config import get_settings
+    from telegram import WebAppInfo
     settings = get_settings()
-    webapp_url = getattr(settings, "WEBAPP_URL", None)
+    webapp_url = getattr(settings, "WEBAPP_URL", "https://emyc-exam.pages.dev")
 
-    rows = []
-    if webapp_url:
-        from telegram import WebAppInfo
-        rows.append([InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=webapp_url))])
-        rows.append([InlineKeyboardButton(f"💬 {get_text('start_exam_btn', lang)} (Bot Chat)", callback_data=f"exam:start:{competition_id}")])
-    else:
-        rows.append([InlineKeyboardButton(get_text("start_exam_btn", lang), callback_data=f"exam:start:{competition_id}")])
-
-    rows.append([InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")])
+    rows = [
+        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
+    ]
     return InlineKeyboardMarkup(rows)
 
 

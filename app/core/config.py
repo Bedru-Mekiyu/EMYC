@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     BOT_MODE: Literal["polling", "webhook", "disabled"] = "polling"
     WEBHOOK_URL: Optional[str] = None
     WEBHOOK_SECRET: Optional[str] = None
-    WEBAPP_URL: Optional[str] = None
+    WEBAPP_URL: str = "https://emyc-exam.pages.dev"
 
     # Administrative Telegram user IDs
     ADMIN_TELEGRAM_IDS: str = ""
@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     # Localization
     DEFAULT_LANGUAGE: str = "en"
     SUPPORTED_LANGUAGES: List[str] = ["en", "am", "om", "ar"]
+
+    @field_validator("WEBAPP_URL", mode="before")
+    @classmethod
+    def default_webapp_url(cls, v: Optional[str]) -> str:
+        if not v or not str(v).strip():
+            return "https://emyc-exam.pages.dev"
+        return str(v).strip()
 
     @field_validator("ENVIRONMENT", mode="before")
     @classmethod

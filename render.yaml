@@ -22,6 +22,8 @@ services:
         sync: false
       - key: WEBHOOK_SECRET
         sync: false
+      - key: WEBAPP_URL
+        value: https://emyc-exam.pages.dev
       - key: ADMIN_TELEGRAM_IDS
         sync: false
       - key: MEMBERSHIP_ADAPTER_TYPE

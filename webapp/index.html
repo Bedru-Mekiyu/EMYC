@@ -257,6 +257,36 @@
     </div>
   </div>
 
+  <!-- Standalone Web Browser Login Modal -->
+  <div id="modal-web-login" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="lbl-web-login-title">🌐 Web Exam Login</h3>
+        <button id="btn-close-web-login" class="btn btn-icon-close">✕</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+        Sign in to take or test the exam directly in your web browser without opening Telegram.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px;">
+        <div>
+          <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">
+            Telegram User ID or Membership ID:
+          </label>
+          <input type="text" id="input-web-login-id" placeholder="e.g. 12345678 or EMYC/..." 
+            style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); font-size: 14px;" />
+        </div>
+        <button id="btn-web-login-submit" class="btn btn-primary btn-full">
+          🚀 Sign In & Start Exam
+        </button>
+        <div style="text-align: center; font-size: 12px; color: var(--text-secondary); margin: 2px 0;">— OR —</div>
+        <button id="btn-web-admin-quick-test" class="btn btn-accent btn-full">
+          ⚡ 1-Tap Admin Test Login
+        </button>
+      </div>
+      <div id="web-login-error" style="color: var(--danger); font-size: 12px; display: none; margin-top: 4px;"></div>
+    </div>
+  </div>
+
   <!-- Quick Settings & Accessibility Modal -->
   <div id="modal-settings" class="modal-overlay">
     <div class="modal-card">

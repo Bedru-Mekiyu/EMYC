@@ -177,19 +177,65 @@
 
   const BACKEND_URL = 'https://emyc.onrender.com';
 
-  function getInitData() {
-    if (tg?.initData) return tg.initData;
+  function getAuthHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (tg?.initData) {
+      headers['X-Telegram-Init-Data'] = tg.initData;
+      return headers;
+    }
+    const webToken = sessionStorage.getItem('emyc_web_token');
+    if (webToken) {
+      headers['X-Web-Auth-Token'] = webToken;
+      return headers;
+    }
     const search = window.location.search;
     if (search && search.includes('hash=')) {
-      return search.startsWith('?') ? search.slice(1) : search;
+      headers['X-Telegram-Init-Data'] = search.startsWith('?') ? search.slice(1) : search;
+      return headers;
     }
-    return 'user=%7B%22id%22%3A12345678%2C%22username%22%3A%22teststudent%22%2C%22first_name%22%3A%22Student%22%7D&auth_date=1791211002&hash=test_valid_mock_hash';
+    return headers;
   }
 
-  const authHeaders = {
-    'Content-Type': 'application/json',
-    'X-Telegram-Init-Data': getInitData(),
-  };
+  function showWebLoginModal() {
+    const modal = document.getElementById('modal-web-login');
+    if (modal) modal.classList.add('visible');
+  }
+
+  function hideWebLoginModal() {
+    const modal = document.getElementById('modal-web-login');
+    if (modal) modal.classList.remove('visible');
+  }
+
+  async function performWebLogin(payload) {
+    const errDiv = document.getElementById('web-login-error');
+    if (errDiv) errDiv.style.display = 'none';
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/webapp/auth/web-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (errDiv) {
+          errDiv.textContent = data.detail || 'Login failed. Please check credentials.';
+          errDiv.style.display = 'block';
+        }
+        return;
+      }
+      if (data.token) {
+        sessionStorage.setItem('emyc_web_token', data.token);
+        hideWebLoginModal();
+        await initExamSession();
+      }
+    } catch (e) {
+      if (errDiv) {
+        errDiv.textContent = 'Connection error. Please try again.';
+        errDiv.style.display = 'block';
+      }
+    }
+  }
 
   function getStorageKeys(attemptId) {
     return {
@@ -226,14 +272,24 @@
     applyStaticLocales();
     showView('loading');
 
+    // Standalone browser without Telegram initData and no saved web token
+    if (!tg?.initData && !sessionStorage.getItem('emyc_web_token') && !window.location.search.includes('hash=')) {
+      showWebLoginModal();
+      return;
+    }
+
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/webapp/session`, {
         method: 'GET',
-        headers: authHeaders,
+        headers: getAuthHeaders(),
       });
 
       if (!res.ok) {
         if (res.status === 401) {
+          if (!tg?.initData) {
+            showWebLoginModal();
+            return;
+          }
           showError("Authentication Notice", "To take the official competition, please launch this app directly inside your Telegram Bot chat.", true, true);
           return;
         }
@@ -674,7 +730,7 @@
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/webapp/submit`, {
         method: 'POST',
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload),
       });
 
@@ -955,8 +1011,24 @@
   document.getElementById('btn-cancel-submit')?.addEventListener('click', () => closeModal('modal-confirm'));
   document.getElementById('btn-do-submit')?.addEventListener('click', () => submitExamBatch(false));
 
-  document.getElementById('btn-exit')?.addEventListener('click', () => {
-    if (tg) tg.close();
+  // Standalone Web Login Events
+  document.getElementById('btn-web-login-submit')?.addEventListener('click', () => {
+    const raw = document.getElementById('input-web-login-id')?.value.trim();
+    if (!raw) return;
+    if (/^\d+$/.test(raw)) {
+      performWebLogin({ telegram_user_id: parseInt(raw, 10) });
+    } else {
+      performWebLogin({ membership_id: raw });
+    }
+  });
+
+  document.getElementById('btn-web-admin-quick-test')?.addEventListener('click', () => {
+    performWebLogin({ admin_test: true });
+  });
+
+  document.getElementById('btn-close-web-login')?.addEventListener('click', () => {
+    hideWebLoginModal();
+    showError("Practice Mode", "You can try the offline practice exam below or log in anytime to take the official exam.", true, true);
   });
 
   // Initial startup
