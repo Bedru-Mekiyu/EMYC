@@ -136,25 +136,13 @@ async def web_login(
     target_user_id = payload.telegram_user_id
     participant = None
 
-    if payload.admin_test or (target_user_id and settings.is_admin(target_user_id)):
-        admin_id = target_user_id or (settings.admin_ids[0] if settings.admin_ids else 999999999)
-        part_stmt = select(Participant).where(Participant.telegram_user_id == admin_id)
-        participant = (await db.execute(part_stmt)).scalar_one_or_none()
-        if not participant:
-            participant = Participant(
-                telegram_user_id=admin_id,
-                telegram_username="admin_tester",
-                full_name="Admin Test Candidate",
-                phone_number="+251900000000",
-                membership_id=f"ADMIN-{admin_id}",
-                is_active=True,
-            )
-            db.add(participant)
-            await db.commit()
-            await db.refresh(participant)
-        target_user_id = admin_id
+    if (target_user_id and settings.is_admin(target_user_id)) or payload.admin_test:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is authorized for administration and cannot participate in this competition.",
+        )
 
-    elif target_user_id:
+    if target_user_id:
         part_stmt = select(Participant).where(Participant.telegram_user_id == target_user_id)
         participant = (await db.execute(part_stmt)).scalar_one_or_none()
         if not participant:

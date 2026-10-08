@@ -210,14 +210,35 @@ class CompetitionService:
         if new_status == CompetitionStatus.LIVE:
             if comp.status == CompetitionStatus.LIVE:
                 raise CompetitionError("Examination session is already LIVE")
+
+            # Enforce strict single-LIVE invariant: auto-close any other currently LIVE competition
+            other_live_stmt = (
+                select(Competition)
+                .where(and_(Competition.status == CompetitionStatus.LIVE, Competition.id != comp.id))
+                .with_for_update()
+            )
+            other_live_comps = list((await db.execute(other_live_stmt)).scalars().all())
+            for old_comp in other_live_comps:
+                old_comp.status = CompetitionStatus.CLOSED
+                old_act_stmt = select(ExamAttempt).where(
+                    and_(
+                        ExamAttempt.competition_id == old_comp.id,
+                        ExamAttempt.status == AttemptStatus.IN_PROGRESS,
+                    )
+                )
+                for old_att in (await db.execute(old_act_stmt)).scalars().all():
+                    await CompetitionService.auto_submit_expired_attempt(db, old_att, commit=False)
+
             # Authoritative server timestamps for the actual examination session:
             if comp.actual_exam_started_at is None:
                 comp.actual_exam_started_at = now
                 comp.actual_exam_ends_at = now + timedelta(minutes=comp.duration_minutes or 60)
             # Ensure competition availability window encloses the exam session without shrinking it:
-            if not comp.opens_at or comp.opens_at > now:
+            opens_utc = ensure_utc(comp.opens_at)
+            closes_utc = ensure_utc(comp.closes_at)
+            if not opens_utc or opens_utc > now:
                 comp.opens_at = now
-            if not comp.closes_at or comp.closes_at < comp.actual_exam_ends_at:
+            if not closes_utc or closes_utc < comp.actual_exam_ends_at:
                 comp.closes_at = comp.actual_exam_ends_at
             await CompetitionService.validate_competition_for_live(db, comp)
 
@@ -272,8 +293,11 @@ class CompetitionService:
 
         comp.duration_minutes = new_duration_minutes
         if comp.status == CompetitionStatus.LIVE and comp.actual_exam_started_at:
-            comp.actual_exam_ends_at = comp.actual_exam_started_at + timedelta(minutes=new_duration_minutes)
-            comp.closes_at = max(comp.closes_at, comp.actual_exam_ends_at)
+            started_utc = ensure_utc(comp.actual_exam_started_at)
+            comp.actual_exam_ends_at = started_utc + timedelta(minutes=new_duration_minutes)
+            closes_utc = ensure_utc(comp.closes_at)
+            if not closes_utc or closes_utc < comp.actual_exam_ends_at:
+                comp.closes_at = comp.actual_exam_ends_at
 
             # Synchronize ALL in-progress attempts to the single updated global deadline
             await db.execute(
@@ -371,7 +395,7 @@ class CompetitionService:
             select(Competition)
             .where(
                 and_(
-                    Competition.status.in_([CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]),
+                    Competition.status.in_([CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]),
                     Competition.closes_at > current_time,
                 )
             )

@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union, List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from sqlalchemy import select, func, and_, case
 from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -81,6 +82,57 @@ def format_competition_status(status: Any) -> str:
     return STATUS_DISPLAY_MAP.get(status, str(getattr(status, "value", status)).capitalize())
 
 
+async def resolve_target_competition(
+    db: AsyncSession,
+    comp_id: Optional[Union[uuid.UUID, str]] = None,
+) -> Optional[Competition]:
+    """Authoritatively resolves the target competition:
+    1. Explicit comp_id if specified and exists.
+    2. Active LIVE competition (highest priority).
+    3. Upcoming OPEN or SCHEDULED competition.
+    4. Most recently modified CLOSED / FINALIZED / PUBLISHED competition.
+    5. Fallback to newest created competition.
+    """
+    if comp_id:
+        try:
+            cid = uuid.UUID(str(comp_id))
+            comp = await db.get(Competition, cid)
+            if comp:
+                return comp
+        except (ValueError, TypeError):
+            pass
+
+    # 1. LIVE competition
+    stmt_live = select(Competition).where(Competition.status == CompetitionStatus.LIVE).limit(1)
+    comp = (await db.execute(stmt_live)).scalar_one_or_none()
+    if comp:
+        return comp
+
+    # 2. OPEN or SCHEDULED competition
+    stmt_open = select(Competition).where(
+        Competition.status.in_([CompetitionStatus.OPEN, CompetitionStatus.SCHEDULED])
+    ).order_by(Competition.opens_at.asc()).limit(1)
+    comp = (await db.execute(stmt_open)).scalar_one_or_none()
+    if comp:
+        return comp
+
+    # 3. Recently updated CLOSED, FINALIZED, or PUBLISHED competition
+    stmt_recent = select(Competition).where(
+        Competition.status.in_([
+            CompetitionStatus.CLOSED,
+            CompetitionStatus.RESULTS_FINALIZED,
+            CompetitionStatus.PUBLISHED,
+        ])
+    ).order_by(Competition.updated_at.desc()).limit(1)
+    comp = (await db.execute(stmt_recent)).scalar_one_or_none()
+    if comp:
+        return comp
+
+    # 4. Fallback to latest created
+    stmt_fallback = select(Competition).order_by(Competition.created_at.desc()).limit(1)
+    return (await db.execute(stmt_fallback)).scalar_one_or_none()
+
+
 @require_admin
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles /admin command with EMYC Competition Admin summary and simplified 3-item controls."""
@@ -99,9 +151,10 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
             lang = p.language_code if p and p.language_code else "en"
 
-        # Fetch active or latest competition
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        # Fetch authoritatively resolved target competition
+        comp = await resolve_target_competition(db, context.user_data.get("selected_comp_id"))
+        if comp:
+            context.user_data["selected_comp_id"] = str(comp.id)
 
         title = comp.title if comp else "None"
         status = format_competition_status(comp.status) if comp else "None"
@@ -109,26 +162,21 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Total registered participants (excluding administrators)
         total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        # Attempt metrics for this competition
+        # Attempt metrics for this competition (strictly participant attempts only)
         started = 0
         submitted = 0
         in_progress = 0
         if comp:
             attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
-            all_attempts = list((await db.execute(attempts_stmt)).scalars().all())
             admin_ids = get_settings().admin_ids
             if admin_ids:
                 admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
-                cand_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
-                cand_attempts = list((await db.execute(cand_stmt)).scalars().all())
-            else:
-                cand_attempts = all_attempts
+                attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+            cand_attempts = list((await db.execute(attempts_stmt)).scalars().all())
 
-            # Prefer candidate attempts; fallback to test attempts so admin can verify submissions
-            active_attempts = cand_attempts if len(cand_attempts) > 0 else all_attempts
-            started = len(active_attempts)
-            submitted = sum(1 for a in active_attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
-            in_progress = sum(1 for a in active_attempts if a.status == AttemptStatus.IN_PROGRESS)
+            started = len(cand_attempts)
+            submitted = sum(1 for a in cand_attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
+            in_progress = sum(1 for a in cand_attempts if a.status == AttemptStatus.IN_PROGRESS)
 
     text = get_text(
         "admin_menu_title",
@@ -204,10 +252,18 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
 
+    target_comp_id = None
+    if query.data and ":" in query.data:
+        parts = query.data.split(":")
+        if len(parts) >= 3 and parts[2]:
+            target_comp_id = parts[2]
+    if not target_comp_id:
+        target_comp_id = context.user_data.get("selected_comp_id")
+
     async with AsyncSessionLocal() as db:
-        # Fetch active or latest competition
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        comp = await resolve_target_competition(db, target_comp_id)
+        if comp:
+            context.user_data["selected_comp_id"] = str(comp.id)
 
         if not comp:
             await query.edit_message_text("No competitions found in system.", reply_markup=get_admin_keyboard("en"))
@@ -252,6 +308,33 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 @require_admin
+async def cb_admin_list_comps(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lists all competitions in the database so the admin can pick which one to inspect/manage."""
+    query = update.callback_query
+    await query.answer()
+
+    async with AsyncSessionLocal() as db:
+        comps = list((await db.execute(select(Competition).order_by(Competition.created_at.desc()))).scalars().all())
+        if not comps:
+            await query.edit_message_text("No competitions found.", reply_markup=get_admin_keyboard("en"))
+            return
+
+        buttons = []
+        for c in comps:
+            status_emoji = "🟢" if c.status == CompetitionStatus.LIVE else "📝" if c.status == CompetitionStatus.DRAFT else "🟡" if c.status in [CompetitionStatus.OPEN, CompetitionStatus.SCHEDULED] else "⚪"
+            title_preview = c.title[:24]
+            btn_text = f"{status_emoji} {title_preview} ({c.status.value})"
+            buttons.append([InlineKeyboardButton(btn_text, callback_data=f"admin:competition:{c.id}")])
+
+        buttons.append([InlineKeyboardButton("◀️ Back", callback_data="admin:competition")])
+        await query.edit_message_text(
+            "📋 *Select Competition to Manage:*\n\nChoose a competition from the list below:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+@require_admin
 async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manages competition lifecycle with clean state-aware actions."""
     query = update.callback_query
@@ -259,12 +342,21 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     user_id = user.id if user else 0
 
+    target_comp_id = None
+    if query.data and ":" in query.data:
+        parts = query.data.split(":")
+        if len(parts) >= 3 and parts[2]:
+            target_comp_id = parts[2]
+    if not target_comp_id:
+        target_comp_id = context.user_data.get("selected_comp_id")
+
     async with AsyncSessionLocal() as db:
         p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
         lang = p.language_code if p and p.language_code else "en"
 
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        comp = await resolve_target_competition(db, target_comp_id)
+        if comp:
+            context.user_data["selected_comp_id"] = str(comp.id)
 
         buttons = []
         if not comp:
@@ -279,6 +371,10 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
             buttons.append([InlineKeyboardButton(get_text("admin_btn_back", lang), callback_data="admin:home")])
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
             return
+
+        total_comps = (await db.execute(select(func.count(Competition.id)))).scalar() or 0
+        if total_comps > 1:
+            buttons.append([InlineKeyboardButton("🔀 Switch Competition", callback_data="admin:list_comps")])
 
         # Count actual existing questions in database for this competition
         cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp.id)
@@ -682,20 +778,29 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user = update.effective_user
     user_id = user.id if user else 0
 
+    target_comp_id = None
+    if query.data and ":" in query.data:
+        parts = query.data.split(":")
+        if len(parts) >= 3 and parts[2]:
+            target_comp_id = parts[2]
+    if not target_comp_id:
+        target_comp_id = context.user_data.get("selected_comp_id")
+
     async with AsyncSessionLocal() as db:
         p = await ParticipantService.get_participant_by_telegram_id(db, user_id)
         lang = p.language_code if p and p.language_code else "en"
 
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        comp = await resolve_target_competition(db, target_comp_id)
         if not comp:
             await query.edit_message_text("No competition found.", reply_markup=get_admin_keyboard(lang))
             return
 
+        context.user_data["selected_comp_id"] = str(comp.id)
+
         # Registration metrics (excluding administrators)
         total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        # Database-level aggregate metrics for this competition (excluding administrators)
+        # Database-level aggregate metrics for this competition (strictly excluding administrators)
         admin_ids = get_settings().admin_ids
         admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
 
@@ -719,17 +824,6 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         expired = agg_res.expired or 0
         highest_score = agg_res.highest_score
 
-        is_test_mode = False
-        if started == 0 and admin_p_sub is not None:
-            all_agg_res = (await db.execute(base_agg_stmt)).one()
-            if (all_agg_res.started or 0) > 0:
-                started = all_agg_res.started or 0
-                submitted = all_agg_res.completed or 0
-                in_progress = all_agg_res.in_progress or 0
-                expired = all_agg_res.expired or 0
-                highest_score = all_agg_res.highest_score
-                is_test_mode = True
-
         completion_pct = round((submitted / started) * 100, 1) if started > 0 else 0.0
         top_score_val = f"{highest_score}/{comp.question_count}" if highest_score is not None else "N/A"
 
@@ -746,8 +840,6 @@ async def cb_admin_results(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         top_score=top_score_val,
         status=format_competition_status(comp.status),
     )
-    if is_test_mode:
-        dash_text += "\n\n🧪 _(Displaying Admin Test Simulation Data)_"
 
     await query.edit_message_text(
         dash_text,
@@ -963,8 +1055,7 @@ async def cb_admin_announce_confirm(update: Update, context: ContextTypes.DEFAUL
         # Retrieve all registered participants (excluding administrators)
         user_ids = await ParticipantService.get_registered_participant_user_ids(db, exclude_admins=True)
 
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        comp = await resolve_target_competition(db, context.user_data.get("selected_comp_id"))
         comp_id = comp.id if comp else None
 
         sent_count = 0
@@ -1003,11 +1094,20 @@ async def cb_admin_participants(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
+    target_comp_id = None
+    if query.data and ":" in query.data:
+        parts = query.data.split(":")
+        if len(parts) >= 3 and parts[2]:
+            target_comp_id = parts[2]
+    if not target_comp_id:
+        target_comp_id = context.user_data.get("selected_comp_id")
+
     async with AsyncSessionLocal() as db:
         total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        comp = await resolve_target_competition(db, target_comp_id)
+        if comp:
+            context.user_data["selected_comp_id"] = str(comp.id)
 
         comp_title = comp.title if comp else "None"
         started = 0
@@ -1068,9 +1168,18 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
 
+    target_comp_id = None
+    if query.data and ":" in query.data:
+        parts = query.data.split(":")
+        if len(parts) >= 3 and parts[2]:
+            target_comp_id = parts[2]
+    if not target_comp_id:
+        target_comp_id = context.user_data.get("selected_comp_id")
+
     async with AsyncSessionLocal() as db:
-        stmt = select(Competition).order_by(Competition.created_at.desc()).limit(1)
-        comp = (await db.execute(stmt)).scalar_one_or_none()
+        comp = await resolve_target_competition(db, target_comp_id)
+        if comp:
+            context.user_data["selected_comp_id"] = str(comp.id)
 
         if not comp:
             await query.edit_message_text(
@@ -1096,13 +1205,6 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ExamAttempt.completion_seconds.asc().nulls_last(),
         ]
         attempts = list((await db.execute(cand_stmt.order_by(*order_clauses).limit(5))).scalars().all())
-        is_test_mode = False
-
-        if not attempts:
-            test_attempts = list((await db.execute(attempts_stmt.order_by(*order_clauses).limit(5))).scalars().all())
-            if test_attempts:
-                attempts = test_attempts
-                is_test_mode = True
 
     status_tag = format_competition_status(comp.status)
     if not attempts:
@@ -1113,9 +1215,8 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         body = "_No participant attempts recorded yet._"
     else:
         top_count = len(attempts)
-        test_tag = " 🧪 *(Admin Test Simulation)*" if is_test_mode else ""
         header = (
-            f"🏅 *EMYC Competition Leaderboard*{test_tag}\n\n"
+            f"🏅 *EMYC Competition Leaderboard*\n\n"
             f"*Competition:* {comp.title} ({status_tag})\n"
             f"🏆 *Top {top_count} Performers:*\n\n"
         )
@@ -1127,8 +1228,6 @@ async def cb_admin_rankings(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             p_name = "Participant"
             if att.participant:
                 p_name = att.participant.telegram_username or att.participant.membership_id
-            if is_test_mode:
-                p_name += " [Test]"
 
             score_val = att.score if att.score is not None else "Pending"
             mins, secs = divmod(int(att.completion_seconds or 0), 60)
@@ -1162,9 +1261,13 @@ async def cb_admin_submissions(update: Update, context: ContextTypes.DEFAULT_TYP
             select(ExamAttempt)
             .options(selectinload(ExamAttempt.participant))
             .where(ExamAttempt.competition_id == comp_id)
-            .order_by(ExamAttempt.created_at.desc())
-            .limit(10)
         )
+        admin_ids = get_settings().admin_ids
+        if admin_ids:
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
+            stmt = stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+        stmt = stmt.order_by(ExamAttempt.created_at.desc()).limit(10)
         attempts = list((await db.execute(stmt)).scalars().all())
 
     status_tag = format_competition_status(comp.status)
@@ -1184,15 +1287,9 @@ async def cb_admin_submissions(update: Update, context: ContextTypes.DEFAULT_TYP
             AttemptStatus.EXPIRED: "⌛ Expired",
         }
         lines = []
-        admin_ids = get_settings().admin_ids
         for idx, att in enumerate(attempts, start=1):
             p = att.participant
-            p_tg_id = p.telegram_user_id if p else None
-            is_admin_att = (p_tg_id in admin_ids) if (p_tg_id and admin_ids) else False
-
             p_display = (p.full_name or p.telegram_username or f"ID:{p.membership_id}") if p else "Unknown"
-            if is_admin_att:
-                p_display += " [Admin/Test]"
 
             status_str = status_badges.get(att.status, str(att.status.value if hasattr(att.status, "value") else att.status))
             score_str = f"{att.score}/{comp.question_count}" if att.score is not None else "--"

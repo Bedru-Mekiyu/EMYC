@@ -17,6 +17,7 @@ from app.services.competition_service import (
     DuplicateAttemptError,
 )
 from app.tasks.deadline_sweeper import sweep_expired_attempts_job
+from app.core.time_utils import ensure_utc
 
 
 @pytest.mark.asyncio
@@ -188,7 +189,7 @@ async def test_manual_early_closure_policies(db_session: AsyncSession):
 
     await db_session.refresh(att1)
     assert att1.status == AttemptStatus.EXPIRED
-    assert att1.deadline_at <= now + timedelta(seconds=2)
+    assert ensure_utc(att1.deadline_at) <= now + timedelta(seconds=2)
 
 
 @pytest.mark.asyncio

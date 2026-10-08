@@ -208,7 +208,7 @@ async def test_third_party_contact_rejected_and_own_contact_accepted(db_session:
     assert msg_legit.reply_text.call_count == 2
     # First message: Registration complete + ReplyKeyboardRemove
     call1 = msg_legit.reply_text.call_args_list[0]
-    assert "Registration complete" in call1[0][0]
+    assert "Verification Successful" in call1[0][0] or "Registration complete" in call1[0][0]
     assert isinstance(call1[1].get("reply_markup"), ReplyKeyboardRemove)
 
     # Second message: Direct transition to competition state

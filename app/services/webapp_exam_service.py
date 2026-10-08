@@ -43,29 +43,23 @@ class WebAppExamService:
         """
         now = now_utc()
 
-        # 1. Lookup registered participant
+        # 1. Lookup registered participant & prevent admin participation
+        from app.core.config import get_settings
+        settings = get_settings()
+        if settings.is_admin(telegram_user_id):
+            return {
+                "status": "admin_restricted",
+                "message": "This account is authorized for administration and cannot participate in this competition.",
+            }
+
         part_stmt = select(Participant).where(Participant.telegram_user_id == telegram_user_id)
         p_res = await db.execute(part_stmt)
         participant = p_res.scalar_one_or_none()
         if not participant:
-            from app.core.config import get_settings
-            if get_settings().is_admin(telegram_user_id):
-                participant = Participant(
-                    telegram_user_id=telegram_user_id,
-                    telegram_username="admin_tester",
-                    full_name="Admin Test Candidate",
-                    phone_number="+251900000000",
-                    membership_id=f"ADMIN-{telegram_user_id}",
-                    is_active=True,
-                )
-                db.add(participant)
-                await db.commit()
-                await db.refresh(participant)
-            else:
-                return {
-                    "status": "unregistered",
-                    "message": "Participant must verify membership and register first.",
-                }
+            return {
+                "status": "unregistered",
+                "message": "Participant must verify membership and register first.",
+            }
 
         # 2. Resolve competition (explicit comp_id or active LIVE competition)
         comp = None
@@ -295,7 +289,11 @@ class WebAppExamService:
         """
         now = now_utc()
 
-        # 1. Authorize attempt belongs to this telegram user
+        # 1. Authorize attempt belongs to this telegram user and prevent admin participation
+        from app.core.config import get_settings
+        if get_settings().is_admin(telegram_user_id):
+            raise UnauthorizedAttemptAccessError("Administrators cannot submit exam attempts.")
+
         stmt = (
             select(ExamAttempt)
             .options(selectinload(ExamAttempt.participant), selectinload(ExamAttempt.competition))

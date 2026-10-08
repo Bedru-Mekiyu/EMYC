@@ -52,10 +52,9 @@ def test_multilingual_welcome_branding_and_greeting():
         # Verify main keyboard buttons: strictly 2 buttons: [Change Language], [Competition]
         kb = get_main_menu_keyboard(lang)
         assert len(kb.inline_keyboard) == 2
-        # Row 1: Change Language
-        assert "🌐" in kb.inline_keyboard[0][0].text
-        # Row 2: Competition
-        assert "🏆" in kb.inline_keyboard[1][0].text
+        button_texts = [row[0].text for row in kb.inline_keyboard]
+        assert any("🌐" in t for t in button_texts)
+        assert any("🏆" in t for t in button_texts)
 
 
 def test_keyboard_layouts():

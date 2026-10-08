@@ -44,3 +44,4 @@ htmlcov/
 *.sqlite3
 
 .pg_test_data/
+screenshot/

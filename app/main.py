@@ -35,6 +35,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during database schema migration: {e}", exc_info=True)
 
+    # Sanitize database: purge any accidental admin participant records
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.services.membership_service import ParticipantService
+        async with AsyncSessionLocal() as session:
+            purged = await ParticipantService.purge_admin_participant_records(session)
+            if purged > 0:
+                logger.info(f"Database sanitized: purged {purged} accidental admin participant records.")
+    except Exception as e:
+        logger.warning(f"Could not purge admin participant records on startup: {e}")
+
     # Launch background deadline sweeper
     sweeper_task = asyncio.create_task(start_periodic_sweeper(interval_seconds=30))
 

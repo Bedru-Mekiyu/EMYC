@@ -67,13 +67,17 @@ def get_start_exam_keyboard(competition_id: uuid.UUID, lang: str = "en") -> Inli
     from app.core.config import get_settings
     from telegram import WebAppInfo
     settings = get_settings()
-    webapp_url = getattr(settings, "WEBAPP_URL", "https://emyc-exam.pages.dev")
-    launch_url = f"{webapp_url}?comp_id={competition_id}"
+    raw_webapp_url = getattr(settings, "WEBAPP_URL", None)
+    webapp_url = raw_webapp_url if raw_webapp_url is not None else None
 
-    rows = [
-        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=launch_url))],
-        [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
-    ]
+    rows = []
+    if webapp_url:
+        launch_url = f"{webapp_url}?comp_id={competition_id}"
+        rows.append([InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=launch_url))])
+    else:
+        rows.append([InlineKeyboardButton(get_text("start_exam_btn", lang), callback_data=f"exam:start:{competition_id}")])
+
+    rows.append([InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")])
     return InlineKeyboardMarkup(rows)
 
 

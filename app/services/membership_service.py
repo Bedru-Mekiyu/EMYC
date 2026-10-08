@@ -110,8 +110,8 @@ class ParticipantService:
         if re.match(settings.MEMBERSHIP_REGEX, cleaned):
             return cleaned
 
-        # In mock adapter or non-strict mode, accept common variations (e.g. 12345 or EMYC12345)
-        if settings.MEMBERSHIP_ADAPTER_TYPE == "mock":
+        # In mock adapter or non-strict mode, accept common variations (e.g. 12345 or EMYC12345 without slashes)
+        if "/" not in cleaned and settings.MEMBERSHIP_ADAPTER_TYPE == "mock":
             digits_match = re.search(r"(\d{4,10})", cleaned)
             if digits_match:
                 digits = digits_match.group(1)
@@ -209,6 +209,20 @@ class ParticipantService:
         return cleaned_membership
 
     @staticmethod
+    async def purge_admin_participant_records(db: AsyncSession, admin_ids: Optional[List[int]] = None) -> int:
+        """Purges any lingering Participant and ExamAttempt records belonging to admin IDs."""
+        ids = admin_ids or settings.admin_ids
+        if not ids:
+            return 0
+        from app.models.attempt import ExamAttempt
+        from sqlalchemy import delete
+        p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(ids))
+        await db.execute(delete(ExamAttempt).where(ExamAttempt.participant_id.in_(p_sub)))
+        del_parts = await db.execute(delete(Participant).where(Participant.telegram_user_id.in_(ids)))
+        await db.commit()
+        return del_parts.rowcount
+
+    @staticmethod
     async def register_or_bind_participant(
         db: AsyncSession,
         telegram_user_id: int,
@@ -220,6 +234,9 @@ class ParticipantService:
         phone_number: Optional[str] = None,
     ) -> Participant:
         """Verifies membership and binds/persists participant in a single database transaction."""
+        if settings.is_admin(telegram_user_id):
+            raise ValueError("Administrators cannot be registered as exam participants.")
+
         cleaned_membership = await ParticipantService.verify_membership_id(
             db=db,
             telegram_user_id=telegram_user_id,

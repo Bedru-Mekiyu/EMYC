@@ -278,16 +278,16 @@ async def test_synchronized_competition_deadline_and_late_joiner_clamp(db_sessio
     # 2. Participant 1 starts right at t0
     attempt1 = await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t0)
     # Deadline is min(t0 + 60m, closes_at) = t0 + 60m (full 60 min)
-    assert attempt1.deadline_at == t0 + timedelta(minutes=60)
-    time_left_p1 = (attempt1.deadline_at - t0).total_seconds() / 60
+    assert ensure_utc(attempt1.deadline_at) == t0 + timedelta(minutes=60)
+    time_left_p1 = (ensure_utc(attempt1.deadline_at) - t0).total_seconds() / 60
     assert time_left_p1 == 60
 
     # 3. Participant 2 joins 15 minutes late at t0 + 15m
     t_late = t0 + timedelta(minutes=15)
     attempt2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_late)
     # Deadline must NOT be t_late + 60m; it MUST be strictly clamped to comp.actual_exam_ends_at = t0 + 60m!
-    assert attempt2.deadline_at == comp.actual_exam_ends_at
-    time_left_p2 = (attempt2.deadline_at - t_late).total_seconds() / 60
+    assert ensure_utc(attempt2.deadline_at) == ensure_utc(comp.actual_exam_ends_at)
+    time_left_p2 = (ensure_utc(attempt2.deadline_at) - t_late).total_seconds() / 60
     assert time_left_p2 == 45  # Exactly 45 minutes remaining!
 
     # 4. Participant 3 tries to start after competition has expired (t0 + 61m)
@@ -376,20 +376,20 @@ async def test_two_phase_competition_lifecycle_availability_and_global_exam(db_s
     # 3. Global Timer:
     # Participant 1 starts right at 14:00 UTC
     att1 = await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t_exam_start)
-    assert att1.deadline_at == t_exam_end
-    assert (att1.deadline_at - t_exam_start).total_seconds() / 60 == 120  # 120 min left
+    assert ensure_utc(att1.deadline_at) == t_exam_end
+    assert (ensure_utc(att1.deadline_at) - t_exam_start).total_seconds() / 60 == 120  # 120 min left
 
     # Participant 2 joins 30 min late (14:30 UTC)
     t_p2 = t_exam_start + timedelta(minutes=30)
     att2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_p2)
-    assert att2.deadline_at == t_exam_end  # Shared global deadline!
-    assert (att2.deadline_at - t_p2).total_seconds() / 60 == 90  # Only 90 min left
+    assert ensure_utc(att2.deadline_at) == t_exam_end  # Shared global deadline!
+    assert (ensure_utc(att2.deadline_at) - t_p2).total_seconds() / 60 == 90  # Only 90 min left
 
     # Participant 3 joins 90 min late (15:30 UTC)
     t_p3 = t_exam_start + timedelta(minutes=90)
     att3 = await CompetitionService.start_attempt(db_session, comp.id, p3.id, now_override=t_p3)
-    assert att3.deadline_at == t_exam_end  # Shared global deadline!
-    assert (att3.deadline_at - t_p3).total_seconds() / 60 == 30  # Only 30 min left
+    assert ensure_utc(att3.deadline_at) == t_exam_end  # Shared global deadline!
+    assert (ensure_utc(att3.deadline_at) - t_p3).total_seconds() / 60 == 30  # Only 30 min left
 
     # Participant 4 tries to start after exam deadline (16:05 UTC)
     t_after = t_exam_end + timedelta(minutes=5)
@@ -570,22 +570,22 @@ async def test_live_duration_extension_synchronizes_all_active_attempts(db_sessi
 
     # 1. Participant A starts at t0: deadline is t0 + 60m
     att1 = await CompetitionService.start_attempt(db_session, comp.id, p1.id, now_override=t0)
-    assert att1.deadline_at == t0 + timedelta(minutes=60)
+    assert ensure_utc(att1.deadline_at) == t0 + timedelta(minutes=60)
 
     # 2. Admin extends live exam duration to 90 minutes at t0 + 20m
     updated_comp = await CompetitionService.extend_live_exam_duration(db_session, comp.id, new_duration_minutes=90)
     assert updated_comp.duration_minutes == 90
-    assert updated_comp.actual_exam_ends_at == t0 + timedelta(minutes=90)
+    assert ensure_utc(updated_comp.actual_exam_ends_at) == t0 + timedelta(minutes=90)
 
     # Verify Participant A's existing in-progress attempt deadline was updated to t0 + 90m
     await db_session.refresh(att1)
-    assert att1.deadline_at == t0 + timedelta(minutes=90)
+    assert ensure_utc(att1.deadline_at) == t0 + timedelta(minutes=90)
 
     # 3. Participant B starts late at t0 + 30m: receives the exact same global deadline (t0 + 90m)
     t_p2 = t0 + timedelta(minutes=30)
     att2 = await CompetitionService.start_attempt(db_session, comp.id, p2.id, now_override=t_p2)
-    assert att2.deadline_at == t0 + timedelta(minutes=90)
-    assert att2.deadline_at == att1.deadline_at  # Strictly identical global deadline!
-    assert (att2.deadline_at - t_p2).total_seconds() / 60 == 60  # Exactly 60 minutes remaining
+    assert ensure_utc(att2.deadline_at) == t0 + timedelta(minutes=90)
+    assert ensure_utc(att2.deadline_at) == ensure_utc(att1.deadline_at)  # Strictly identical global deadline!
+    assert (ensure_utc(att2.deadline_at) - t_p2).total_seconds() / 60 == 60  # Exactly 60 minutes remaining
 
 

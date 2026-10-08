@@ -95,8 +95,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from app.core.config import get_settings
     settings = get_settings()
 
-    # If user is an administrator and sent /start command, open Admin Dashboard directly
-    if update.message and settings.is_admin(user.id):
+    # If user is an administrator, open Admin Dashboard directly
+    if settings.is_admin(user.id):
         from app.bot.handlers.admin import cmd_admin
         await cmd_admin(update, context)
         return
@@ -409,29 +409,25 @@ async def cb_start_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     await query.answer()
     user = update.effective_user
+    if not user:
+        return
+
+    from app.core.config import get_settings
+    settings = get_settings()
+    if settings.is_admin(user.id):
+        from app.bot.handlers.admin import cmd_admin
+        await cmd_admin(update, context)
+        return
+
     lang = await get_user_lang(user.id, context=context)
 
     try:
         async with AsyncSessionLocal() as db:
             participant = await ParticipantService.get_participant_by_telegram_id(db, user.id)
 
-            # 1. Unregistered -> Check if admin testing, registration in progress, or prompt for Membership ID
+            # 1. Unregistered -> Check if registration in progress, or prompt for Membership ID
             if not participant:
-                from app.core.config import get_settings
-                if get_settings().is_admin(user.id):
-                    participant = Participant(
-                        telegram_user_id=user.id,
-                        telegram_username=user.username or "admin_tester",
-                        full_name=user.full_name or "Admin Test Candidate",
-                        phone_number="+251900000000",
-                        membership_id=f"ADMIN-{user.id}",
-                        is_active=True,
-                    )
-                    db.add(participant)
-                    await db.commit()
-                    await db.refresh(participant)
-                else:
-                    reg_data = context.user_data.get("registration")
+                reg_data = context.user_data.get("registration")
                 if reg_data:
                     step = reg_data.get("step")
                     if step == "phone":
@@ -754,6 +750,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 return
 
+    # Case D.0: Disallow admin participation in registration
+    from app.core.config import get_settings
+    if get_settings().is_admin(user.id):
+        from app.bot.handlers.admin import cmd_admin
+        await cmd_admin(update, context)
+        return
+
     # Case D.1: Participant Registration state machine (Full Name & Phone text fallback)
     reg_data = context.user_data.get("registration")
     if reg_data:
@@ -886,6 +889,12 @@ async def handle_contact_message(update: Update, context: ContextTypes.DEFAULT_T
     if not user or not update.message or not update.message.contact:
         return
 
+    from app.core.config import get_settings
+    if get_settings().is_admin(user.id):
+        from app.bot.handlers.admin import cmd_admin
+        await cmd_admin(update, context)
+        return
+
     lang = await get_user_lang(user.id)
     reg_data = context.user_data.get("registration")
 
@@ -958,14 +967,25 @@ async def cb_exam_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     await query.answer()
     user = update.effective_user
-    lang = await get_user_lang(user.id)
+    if not user:
+        return
 
     from app.core.config import get_settings
+    if get_settings().is_admin(user.id):
+        from app.bot.handlers.admin import cmd_admin
+        await cmd_admin(update, context)
+        return
+
+    lang = await get_user_lang(user.id)
+
     from telegram import WebAppInfo
     webapp_url = getattr(get_settings(), "WEBAPP_URL", "https://emyc-exam.pages.dev")
+    async with AsyncSessionLocal() as db:
+        comp = await CompetitionService.get_active_competition(db)
+    launch_url = f"{webapp_url}?comp_id={comp.id}" if comp else webapp_url
 
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=webapp_url))],
+        [InlineKeyboardButton(f"🚀 {get_text('start_exam_btn', lang)} (Mini App)", web_app=WebAppInfo(url=launch_url))],
         [InlineKeyboardButton(get_text("back_btn", lang), callback_data="menu:home")],
     ])
     await query.edit_message_text(

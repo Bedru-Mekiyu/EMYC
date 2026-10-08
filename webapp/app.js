@@ -307,13 +307,38 @@
           return;
         }
         if (res.status === 403) {
-          showError(t('not_live_title'), t('not_live_desc'), true, true);
+          let errMsg = t('not_live_desc');
+          try {
+            const errData = await res.json();
+            if (errData && errData.detail) errMsg = errData.detail;
+          } catch (_) {}
+          showError("Access Notice", errMsg, false, false);
           return;
         }
         throw new Error(`HTTP ${res.status}`);
       }
 
       const data = await res.json();
+
+      if (data.status === 'admin_restricted') {
+        showError(
+          "Administrator Account",
+          data.message || "This account is authorized for administration and cannot participate in this competition.",
+          false,
+          false
+        );
+        return;
+      }
+
+      if (data.status === 'unregistered') {
+        showError(
+          "Registration Required",
+          data.message || "Please register and verify membership in the Telegram bot before opening the exam.",
+          false,
+          false
+        );
+        return;
+      }
 
       if (data.status === 'not_live' || data.status === 'scheduled' || data.status === 'closed') {
         showError(t('not_live_title'), data.message || t('not_live_desc'), true, true);

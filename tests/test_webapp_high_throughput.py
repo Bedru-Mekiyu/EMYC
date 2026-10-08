@@ -77,9 +77,10 @@ def test_start_exam_keyboard_with_webapp_url(monkeypatch):
     # Case 2: With WEBAPP_URL configured
     monkeypatch.setattr(settings, "WEBAPP_URL", "https://emyc-exam.pages.dev")
     kb2 = get_start_exam_keyboard(test_comp_id, lang="en")
-    assert len(kb2.inline_keyboard) == 3
+    assert len(kb2.inline_keyboard) == 2
     assert kb2.inline_keyboard[0][0].web_app is not None
-    assert kb2.inline_keyboard[0][0].web_app.url == "https://emyc-exam.pages.dev"
+    assert "https://emyc-exam.pages.dev" in kb2.inline_keyboard[0][0].web_app.url
+    assert str(test_comp_id) in kb2.inline_keyboard[0][0].web_app.url
 
 
 @pytest.mark.asyncio
