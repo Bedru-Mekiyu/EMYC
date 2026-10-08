@@ -15,6 +15,22 @@ from app.main import app
 settings = get_settings()
 TEST_DB_URL = settings.TEST_DATABASE_URL
 
+import os, socket
+if "TEST_DATABASE_URL" not in os.environ:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(("127.0.0.1", 5434))
+        s.close()
+        TEST_DB_URL = "postgresql+asyncpg://postgres:postgrespassword@localhost:5434/competition_test_db"
+    except Exception:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(("127.0.0.1", 5433))
+            s.close()
+            TEST_DB_URL = "postgresql+asyncpg://postgres@localhost:5433/competition_test_db"
+        except Exception:
+            pass
+
 test_engine = create_async_engine(
     TEST_DB_URL,
     echo=False,

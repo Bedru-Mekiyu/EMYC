@@ -75,9 +75,19 @@ class NetworkBenchmarkMetrics:
         self.status_codes: Dict[int, int] = {}
         self.start_time: float = 0
         self.end_time: float = 0
+        self.current_in_flight = 0
+        self.peak_in_flight = 0
 
     def start(self):
         self.start_time = time.perf_counter()
+
+    def enter_request(self):
+        self.current_in_flight += 1
+        if self.current_in_flight > self.peak_in_flight:
+            self.peak_in_flight = self.current_in_flight
+
+    def exit_request(self):
+        self.current_in_flight = max(0, self.current_in_flight - 1)
 
     def record(self, latency_ms: float, success: bool = True, status_code: int = 200):
         self.latencies_ms.append(latency_ms)
@@ -104,6 +114,7 @@ class NetworkBenchmarkMetrics:
                 "error_rate_pct": 0.0,
                 "duration_seconds": round(duration, 2),
                 "rps": round(rps, 1),
+                "peak_in_flight_concurrency": self.peak_in_flight,
                 "status_distribution": self.status_codes,
                 "p50_ms": 0.0,
                 "p90_ms": 0.0,
@@ -127,12 +138,61 @@ class NetworkBenchmarkMetrics:
             "error_rate_pct": round((self.error_count / total_reqs) * 100, 3) if total_reqs else 0.0,
             "duration_seconds": round(duration, 2),
             "rps": round(rps, 1),
+            "peak_in_flight_concurrency": self.peak_in_flight,
             "status_distribution": self.status_codes,
             "p50_ms": pct(50),
             "p90_ms": pct(90),
             "p95_ms": pct(95),
             "p99_ms": pct(99),
             "max_ms": round(sorted_lat[-1], 2),
+        }
+
+
+class DatabasePeakSampler:
+    """Continuously samples PostgreSQL connection pool metrics to record high-water marks."""
+    def __init__(self, interval_sec: float = 0.5):
+        self.interval_sec = interval_sec
+        self.running = False
+        self.peak_connections = 0
+        self.peak_active_connections = 0
+        self._task: Optional[asyncio.Task] = None
+
+    async def _sample_loop(self):
+        settings = get_settings()
+        if settings.DATABASE_URL.startswith("sqlite"):
+            return
+        while self.running:
+            try:
+                async with AsyncSessionLocal() as db:
+                    res = await db.execute(text(
+                        "SELECT count(*), count(*) FILTER (WHERE state = 'active') FROM pg_stat_activity WHERE datname = current_database();"
+                    ))
+                    row = res.first()
+                    if row:
+                        total, active = row[0] or 0, row[1] or 0
+                        if total > self.peak_connections:
+                            self.peak_connections = total
+                        if active > self.peak_active_connections:
+                            self.peak_active_connections = active
+            except Exception:
+                pass
+            await asyncio.sleep(self.interval_sec)
+
+    def start(self):
+        self.running = True
+        self._task = asyncio.create_task(self._sample_loop())
+
+    async def stop(self) -> Dict[str, int]:
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        return {
+            "peak_total_connections": self.peak_connections,
+            "peak_active_connections": self.peak_active_connections,
         }
 
 
@@ -273,6 +333,7 @@ async def run_network_session_surge(
 
             tg_id = p_info["telegram_user_id"]
             headers = {"X-Web-Auth-Token": p_info["token"]}
+            metrics.enter_request()
             t0 = time.perf_counter()
             try:
                 resp = await client.get(f"/api/v1/webapp/session?comp_id={comp_id}", headers=headers)
@@ -292,6 +353,7 @@ async def run_network_session_surge(
                     print(f"[SOCKET EXC] /session {type(e).__name__}: {e}")
                 metrics.record((t1 - t0) * 1000, success=False, status_code=599)
             finally:
+                metrics.exit_request()
                 queue.task_done()
 
     metrics.start()
@@ -334,6 +396,7 @@ async def run_network_submission_surge(
             answers = ANSWER_PATTERNS[tg_id % 4]
             payload = {"attempt_id": att_id, "answers": answers}
 
+            metrics.enter_request()
             t0 = time.perf_counter()
             try:
                 resp = await client.post("/api/v1/webapp/submit", json=payload, headers=headers)
@@ -351,6 +414,7 @@ async def run_network_submission_surge(
                     print(f"[SOCKET EXC] /submit {type(e).__name__}: {e}")
                 metrics.record((t1 - t0) * 1000, success=False, status_code=599)
             finally:
+                metrics.exit_request()
                 queue.task_done()
 
     metrics.start()
@@ -389,6 +453,7 @@ async def run_network_retry_surge(
             answers = [{"display_order": 1, "selected_option": "A"}]
             payload = {"attempt_id": att_id, "answers": answers}
 
+            metrics.enter_request()
             t0 = time.perf_counter()
             try:
                 resp = await client.post("/api/v1/webapp/submit", json=payload, headers=headers)
@@ -402,6 +467,7 @@ async def run_network_retry_surge(
                 t1 = time.perf_counter()
                 metrics.record((t1 - t0) * 1000, success=False, status_code=599)
             finally:
+                metrics.exit_request()
                 queue.task_done()
 
     metrics.start()
@@ -432,6 +498,10 @@ async def execute_network_benchmark(
 
     comp_id, participants = await setup_benchmark_environment(target_users, question_count=100)
 
+    # Start peak connection monitor
+    peak_sampler = DatabasePeakSampler(interval_sec=0.5)
+    peak_sampler.start()
+
     # Configure real TCP HTTP/1.1 client with high connection pooling
     limits = httpx.Limits(max_connections=600, max_keepalive_connections=300, keepalive_expiry=60.0)
     async with AsyncClient(base_url=base_url, limits=limits, timeout=180.0) as client:
@@ -458,9 +528,13 @@ async def execute_network_benchmark(
         retry_metrics = await run_network_retry_surge(client, participants, attempt_ids, sample_size=retry_count, concurrency_limit=concurrency_limit)
         retry_summary = retry_metrics.get_summary()
 
-    print(f"\n[PHASE 1] Session Retrieval: {sess_summary['success_count']:,} successes, {sess_summary['error_count']} errors ({sess_summary['error_rate_pct']}%) | {sess_summary['rps']} RPS | p50={sess_summary['p50_ms']}ms, p95={sess_summary['p95_ms']}ms")
-    print(f"[PHASE 2] Batch Submission: {sub_summary['success_count']:,} successes, {sub_summary['error_count']} errors ({sub_summary['error_rate_pct']}%) | {sub_summary['rps']} Submissions/sec | p50={sub_summary['p50_ms']}ms, p95={sub_summary['p95_ms']}ms")
+    # Stop peak connection monitor
+    db_peak_data = await peak_sampler.stop()
+
+    print(f"\n[PHASE 1] Session Retrieval: {sess_summary['success_count']:,} successes, {sess_summary['error_count']} errors ({sess_summary['error_rate_pct']}%) | {sess_summary['rps']} RPS | p50={sess_summary['p50_ms']}ms, p95={sess_summary['p95_ms']}ms | Peak In-Flight={sess_summary['peak_in_flight_concurrency']}")
+    print(f"[PHASE 2] Batch Submission: {sub_summary['success_count']:,} successes, {sub_summary['error_count']} errors ({sub_summary['error_rate_pct']}%) | {sub_summary['rps']} Submissions/sec | p50={sub_summary['p50_ms']}ms, p95={sub_summary['p95_ms']}ms | Peak In-Flight={sub_summary['peak_in_flight_concurrency']}")
     print(f"[PHASE 3] Idempotent Retries: {retry_summary['success_count']:,} handles, {retry_summary['error_count']} errors ({retry_summary['error_rate_pct']}%) | {retry_summary['rps']} RPS | p95={retry_summary['p95_ms']}ms")
+    print(f"[DB HEADROOM] Peak DB Connections Observed: {db_peak_data['peak_total_connections']} / 250 limit | Peak Active Queries: {db_peak_data['peak_active_connections']}")
 
     # Final telemetry
     cpu_after = psutil.cpu_percent(interval=None)
@@ -473,7 +547,12 @@ async def execute_network_benchmark(
         "concurrency_limit": concurrency_limit,
         "target_url": base_url,
         "competition_id": str(comp_id),
-        "database": db_telemetry_after,
+        "database_headroom": {
+            "max_connections_limit": 250,
+            "peak_total_connections_observed": db_peak_data["peak_total_connections"],
+            "peak_active_connections_observed": db_peak_data["peak_active_connections"],
+            "final_active_connections": db_telemetry_after.get("active_connections"),
+        },
         "telemetry": {
             "ram_before_mb": round(mem_before_mb, 1),
             "ram_after_mb": round(mem_after_mb, 1),
