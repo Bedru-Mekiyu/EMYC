@@ -21,12 +21,17 @@ async def lifespan(app: FastAPI):
 
     # Automatic database schema migration for missing columns
     try:
-        from app.core.database import engine
+        from app.core.database import engine, is_sqlite
         from sqlalchemy import text
-        async with engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS answers_summary JSONB;"))
-            await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS question_sequence JSONB;"))
-        logger.info("Database schema migration: verified exam_attempts JSONB columns exist.")
+        if not is_sqlite:
+            async with engine.begin() as conn:
+                await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS answers_summary JSONB;"))
+                await conn.execute(text("ALTER TABLE exam_attempts ADD COLUMN IF NOT EXISTS question_sequence JSONB;"))
+                await conn.execute(text("ALTER TABLE competitions ADD COLUMN IF NOT EXISTS actual_exam_started_at TIMESTAMPTZ;"))
+                await conn.execute(text("ALTER TABLE competitions ADD COLUMN IF NOT EXISTS actual_exam_ends_at TIMESTAMPTZ;"))
+                await conn.execute(text("ALTER TABLE participants ADD COLUMN IF NOT EXISTS full_name VARCHAR(255);"))
+                await conn.execute(text("ALTER TABLE participants ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);"))
+            logger.info("Database schema migration: verified all essential table columns exist.")
     except Exception as e:
         logger.error(f"Error during database schema migration: {e}", exc_info=True)
 

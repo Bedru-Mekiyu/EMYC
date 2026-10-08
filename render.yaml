@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: emyc-competition-platform
+    name: emyc
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: starter
+    plan: free
     healthCheckPath: /health
     autoDeploy: true
     envVars:

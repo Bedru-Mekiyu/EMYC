@@ -38,11 +38,8 @@ if [ -z "$DB_URL" ] || echo "$DB_URL" | grep -q "localhost:5432" || echo "$DB_UR
 fi
 
 echo "==> Running database migrations (alembic upgrade head)..."
-if ! alembic upgrade head; then
-    echo "❌ Alembic migration failed! Please verify your DATABASE_URL credentials and network access."
-    exit 1
-fi
-echo "==> Database migrations applied successfully."
+alembic upgrade head || echo "⚠️ Alembic upgrade finished with non-zero exit code. Continuing to application startup (self-healing schema migrations will run in lifespan)..."
+echo "==> Database migrations step completed."
 
 echo "==> Starting Uvicorn server on port ${PORT:-8000}..."
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"

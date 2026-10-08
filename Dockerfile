@@ -45,4 +45,4 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["/app/scripts/start.sh"]
+CMD ["/bin/sh", "/app/scripts/start.sh"]
