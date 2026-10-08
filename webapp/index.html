@@ -16,28 +16,30 @@
 
   <!-- Top Navigation Header -->
   <header class="app-header">
-    <div class="header-brand">
-      <div class="brand-logo">E</div>
-      <div class="brand-info">
-        <h1 id="lbl-title">EMYC Exam</h1>
-        <p id="lbl-participant">Student</p>
+    <div class="header-inner">
+      <div class="header-brand">
+        <div class="brand-logo">E</div>
+        <div class="brand-info">
+          <h1 id="lbl-title">EMYC Exam</h1>
+          <p id="lbl-participant">Student</p>
+        </div>
       </div>
-    </div>
 
-    <!-- Centered Countdown Timer Badge -->
-    <div id="timer-box" class="timer-badge">
-      <span class="timer-icon">⏱️</span>
-      <span id="timer-text">--:--</span>
-    </div>
+      <!-- Centered Countdown Timer Badge -->
+      <div id="timer-box" class="timer-badge">
+        <span class="timer-icon">⏱️</span>
+        <span id="timer-text">--:--</span>
+      </div>
 
-    <!-- Right Quick Controls -->
-    <div class="header-controls">
-      <!-- Language Selector Button -->
-      <button id="btn-lang-picker" class="btn-pill" aria-label="Change Language">
-        <span>🌐</span> <span id="lbl-current-lang">EN</span>
-      </button>
-      <!-- Quick Settings / Controls Sheet -->
-      <button id="btn-settings-toggle" class="btn-icon" aria-label="Settings">⚙️</button>
+      <!-- Right Quick Controls -->
+      <div class="header-controls">
+        <!-- Language Selector Button -->
+        <button id="btn-lang-picker" class="btn-pill" aria-label="Change Language">
+          <span>🌐</span> <span id="lbl-current-lang">EN</span>
+        </button>
+        <!-- Quick Settings / Controls Sheet -->
+        <button id="btn-settings-toggle" class="btn-icon" aria-label="Settings">⚙️</button>
+      </div>
     </div>
   </header>
 
@@ -126,15 +128,15 @@
         <div id="result-score" class="score-number">--</div>
         <div id="lbl-score-caption" style="font-size: 13px; color: var(--text-secondary);">Total Score</div>
         <div class="result-stats-row">
-          <div>
+          <div class="result-stat-col">
             <span class="text-emerald font-bold" id="result-correct">0</span>
             <div class="stat-sub">Correct</div>
           </div>
-          <div>
+          <div class="result-stat-col">
             <span class="text-danger font-bold" id="result-incorrect">0</span>
             <div class="stat-sub">Incorrect</div>
           </div>
-          <div>
+          <div class="result-stat-col">
             <span class="text-blue font-bold" id="result-time">0s</span>
             <div class="stat-sub">Time Taken</div>
           </div>

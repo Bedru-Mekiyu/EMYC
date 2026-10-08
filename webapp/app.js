@@ -818,7 +818,14 @@
     const views = ['loading', 'instructions', 'exam', 'result', 'error'];
     views.forEach(v => {
       const el = document.getElementById(`view-${v}`);
-      if (el) el.style.display = (v === viewName ? 'flex' : 'none');
+      if (el) {
+        if (v === viewName) {
+          el.style.display = 'flex';
+          el.style.flexDirection = 'column';
+        } else {
+          el.style.display = 'none';
+        }
+      }
     });
 
     const bottomBar = document.getElementById('bottom-bar');
@@ -827,14 +834,19 @@
 
   function showResultView(result) {
     showView('result');
+    const totalQ = result.total_questions ?? questions.length;
+    const scoreVal = result.score ?? 0;
+    const correctVal = result.correct_count ?? scoreVal;
+    const incorrectVal = result.incorrect_count ?? Math.max(0, totalQ - correctVal);
+
     const scoreEl = document.getElementById('result-score');
-    if (scoreEl) scoreEl.textContent = `${result.score ?? '--'} / ${result.total_questions ?? questions.length}`;
+    if (scoreEl) scoreEl.textContent = `${result.score ?? '--'} / ${totalQ}`;
 
     const correctEl = document.getElementById('result-correct');
-    if (correctEl) correctEl.textContent = result.correct_count ?? result.score ?? 0;
+    if (correctEl) correctEl.textContent = correctVal;
 
     const incorrectEl = document.getElementById('result-incorrect');
-    if (incorrectEl) incorrectEl.textContent = result.incorrect_count ?? 0;
+    if (incorrectEl) incorrectEl.textContent = incorrectVal;
 
     const timeEl = document.getElementById('result-time');
     if (timeEl && result.completion_seconds != null) {
