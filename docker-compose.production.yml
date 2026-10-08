@@ -1,0 +1,136 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: emyc_prod_db
+    restart: unless-stopped
+    command: >
+      postgres
+      -c max_connections=250
+      -c shared_buffers=512MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c wal_buffers=16MB
+      -c checkpoint_completion_target=0.9
+      -c effective_cache_size=2GB
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: competition_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - prod_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d competition_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emyc_prod_app1
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgrespassword@db:5432/competition_db"
+      DATABASE_SYNC_URL: "postgresql://postgres:postgrespassword@db:5432/competition_db"
+      DB_POOL_SIZE: "30"
+      DB_MAX_OVERFLOW: "15"
+      DB_POOL_TIMEOUT: "180.0"
+      WEB_CONCURRENCY: "2"
+      ENVIRONMENT: "production"
+      DEBUG: "false"
+      BOT_MODE: "disabled"
+      TELEGRAM_BOT_TOKEN: "mock_token_for_tests"
+      ADMIN_TELEGRAM_IDS: "999999999"
+      DEFAULT_LANGUAGE: "en"
+
+  app2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emyc_prod_app2
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgrespassword@db:5432/competition_db"
+      DATABASE_SYNC_URL: "postgresql://postgres:postgrespassword@db:5432/competition_db"
+      DB_POOL_SIZE: "30"
+      DB_MAX_OVERFLOW: "15"
+      DB_POOL_TIMEOUT: "180.0"
+      WEB_CONCURRENCY: "2"
+      ENVIRONMENT: "production"
+      DEBUG: "false"
+      BOT_MODE: "disabled"
+      TELEGRAM_BOT_TOKEN: "mock_token_for_tests"
+      ADMIN_TELEGRAM_IDS: "999999999"
+      DEFAULT_LANGUAGE: "en"
+
+  app3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emyc_prod_app3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgrespassword@db:5432/competition_db"
+      DATABASE_SYNC_URL: "postgresql://postgres:postgrespassword@db:5432/competition_db"
+      DB_POOL_SIZE: "30"
+      DB_MAX_OVERFLOW: "15"
+      DB_POOL_TIMEOUT: "180.0"
+      WEB_CONCURRENCY: "2"
+      ENVIRONMENT: "production"
+      DEBUG: "false"
+      BOT_MODE: "disabled"
+      TELEGRAM_BOT_TOKEN: "mock_token_for_tests"
+      ADMIN_TELEGRAM_IDS: "999999999"
+      DEFAULT_LANGUAGE: "en"
+
+  app4:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emyc_prod_app4
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgrespassword@db:5432/competition_db"
+      DATABASE_SYNC_URL: "postgresql://postgres:postgrespassword@db:5432/competition_db"
+      DB_POOL_SIZE: "30"
+      DB_MAX_OVERFLOW: "15"
+      DB_POOL_TIMEOUT: "180.0"
+      WEB_CONCURRENCY: "2"
+      ENVIRONMENT: "production"
+      DEBUG: "false"
+      BOT_MODE: "disabled"
+      TELEGRAM_BOT_TOKEN: "mock_token_for_tests"
+      ADMIN_TELEGRAM_IDS: "999999999"
+      DEFAULT_LANGUAGE: "en"
+
+  nginx:
+    image: nginx:alpine
+    container_name: emyc_prod_nginx
+    restart: unless-stopped
+    depends_on:
+      - app1
+      - app2
+      - app3
+      - app4
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  prod_postgres_data:

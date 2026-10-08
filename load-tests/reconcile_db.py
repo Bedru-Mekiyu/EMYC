@@ -17,16 +17,22 @@ from typing import Optional, Dict, Any
 # Add project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Intelligent database resolution: detect native PostgreSQL 17 on 5433
+# Intelligent database resolution: detect production container on 5434 or native PostgreSQL 17 on 5433
 if "DATABASE_URL" not in os.environ:
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s.connect(("127.0.0.1", 5433))
+        s.connect(("127.0.0.1", 5434))
         s.close()
-        os.environ["DATABASE_URL"] = "postgresql+asyncpg://postgres@localhost:5433/competition_test_db"
+        os.environ["DATABASE_URL"] = "postgresql+asyncpg://postgres:postgrespassword@localhost:5434/competition_db"
     except Exception:
-        os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./benchmark.db"
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(("127.0.0.1", 5433))
+            s.close()
+            os.environ["DATABASE_URL"] = "postgresql+asyncpg://postgres@localhost:5433/competition_test_db"
+        except Exception:
+            os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./benchmark.db"
 
 from sqlalchemy import select, func, text
 from app.core.database import AsyncSessionLocal
