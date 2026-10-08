@@ -441,10 +441,13 @@ class CompetitionService:
         competition_id: uuid.UUID,
         participant_id: uuid.UUID,
         now_override: Optional[datetime] = None,
+        comp: Optional[Competition] = None,
+        skip_existing_check: bool = False,
     ) -> ExamAttempt:
         """Starts an exam attempt for a participant, enforcing schedule, deadlines, and randomization."""
         now = ensure_utc(now_override) if now_override else now_utc()
-        comp = await db.get(Competition, competition_id)
+        if not comp:
+            comp = await db.get(Competition, competition_id)
         if not comp:
             raise CompetitionError("Competition not found")
 
@@ -464,36 +467,23 @@ class CompetitionService:
             raise CompetitionNotOpenError(f"Competition closed at {comp.closes_at}")
 
         # 2. Check for existing attempt
-        existing_stmt = select(ExamAttempt).where(
-            and_(
-                ExamAttempt.competition_id == competition_id,
-                ExamAttempt.participant_id == participant_id,
+        if not skip_existing_check:
+            existing_stmt = select(ExamAttempt).where(
+                and_(
+                    ExamAttempt.competition_id == competition_id,
+                    ExamAttempt.participant_id == participant_id,
+                )
             )
-        )
-        existing_result = await db.execute(existing_stmt)
-        existing = existing_result.scalar_one_or_none()
-        if existing:
-            raise DuplicateAttemptError("Participant already has an official attempt for this competition")
+            existing_result = await db.execute(existing_stmt)
+            existing = existing_result.scalar_one_or_none()
+            if existing:
+                raise DuplicateAttemptError("Participant already has an official attempt for this competition")
 
         # 3. Calculate authoritative global deadline
         if comp.actual_exam_ends_at:
             deadline_at = ensure_utc(comp.actual_exam_ends_at)
         else:
             deadline_at = min(now + timedelta(minutes=comp.duration_minutes), comp_closes)
-
-        attempt = ExamAttempt(
-            competition_id=competition_id,
-            participant_id=participant_id,
-            status=AttemptStatus.IN_PROGRESS,
-            started_at=now,
-            deadline_at=deadline_at,
-        )
-        db.add(attempt)
-        try:
-            await db.flush()
-        except Exception:
-            await db.rollback()
-            raise DuplicateAttemptError("Participant already has an official attempt for this competition")
 
         # 4. Fetch competition questions (cached in-memory)
         questions = await CompetitionService.get_cached_competition_questions(db, competition_id)
@@ -517,11 +507,18 @@ class CompetitionService:
                 "option_mapping": mapping,
             })
 
-        attempt.question_sequence = question_sequence
+        attempt = ExamAttempt(
+            competition_id=competition_id,
+            participant_id=participant_id,
+            status=AttemptStatus.IN_PROGRESS,
+            started_at=now,
+            deadline_at=deadline_at,
+            question_sequence=question_sequence,
+        )
+        db.add(attempt)
 
         try:
             await db.commit()
-            await db.refresh(attempt)
         except Exception:
             await db.rollback()
             raise DuplicateAttemptError("Participant already has an official attempt for this competition")

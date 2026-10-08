@@ -17,8 +17,16 @@ from typing import Optional, Dict, Any
 # Add project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+# Intelligent database resolution: detect native PostgreSQL 17 on 5433
 if "DATABASE_URL" not in os.environ:
-    os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./benchmark.db"
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(("127.0.0.1", 5433))
+        s.close()
+        os.environ["DATABASE_URL"] = "postgresql+asyncpg://postgres@localhost:5433/competition_test_db"
+    except Exception:
+        os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./benchmark.db"
 
 from sqlalchemy import select, func, text
 from app.core.database import AsyncSessionLocal
@@ -51,51 +59,58 @@ async def reconcile_database(target_comp_id: Optional[str] = None) -> bool:
         print(f"Status: {comp.status.value} | Total Questions: {comp.question_count}")
         print("-" * 80)
 
-        # 1. Total Attempts and Status Breakdown
-        attempts = (await db.execute(
-            select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
-        )).scalars().all()
+        # 1. Total Attempts and Status Breakdown using SQL aggregation
+        from sqlalchemy import or_, and_, case
+        counts_res = (await db.execute(
+            select(
+                func.count(ExamAttempt.id),
+                func.count(case((ExamAttempt.status == AttemptStatus.SUBMITTED, 1))),
+                func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))),
+                func.count(case((ExamAttempt.status == AttemptStatus.EXPIRED, 1))),
+                func.count(case((and_(ExamAttempt.status == AttemptStatus.SUBMITTED, ExamAttempt.score.is_(None)), 1))),
+                func.count(case((and_(ExamAttempt.status == AttemptStatus.SUBMITTED, or_(ExamAttempt.score < 0, ExamAttempt.score > comp.question_count)), 1))),
+            ).where(ExamAttempt.competition_id == comp.id)
+        )).one()
 
-        total_attempts = len(attempts)
-        submitted_attempts = [a for a in attempts if a.status == AttemptStatus.SUBMITTED]
-        in_progress_attempts = [a for a in attempts if a.status == AttemptStatus.IN_PROGRESS]
-        expired_attempts = [a for a in attempts if a.status == AttemptStatus.EXPIRED]
+        total_attempts, submitted_count, in_progress_count, expired_count, unscored_count, score_out_of_bounds = counts_res
 
         print(f"Total Exam Attempts Recorded : {total_attempts}")
-        print(f"  - Submitted                 : {len(submitted_attempts)}")
-        print(f"  - In Progress               : {len(in_progress_attempts)}")
-        print(f"  - Expired                   : {len(expired_attempts)}")
+        print(f"  - Submitted                 : {submitted_count}")
+        print(f"  - In Progress               : {in_progress_count}")
+        print(f"  - Expired                   : {expired_count}")
 
         # 2. Invariant Check: Duplicate Attempts per Participant
-        dup_query = await db.execute(
-            select(ExamAttempt.participant_id, func.count(ExamAttempt.id))
+        dup_subq = (
+            select(ExamAttempt.participant_id)
             .where(ExamAttempt.competition_id == comp.id)
             .group_by(ExamAttempt.participant_id)
             .having(func.count(ExamAttempt.id) > 1)
+            .subquery()
         )
-        duplicates = dup_query.all()
-        dup_count = len(duplicates)
+        dup_count = (await db.execute(select(func.count()).select_from(dup_subq))).scalar() or 0
 
-        # 3. Invariant Check: Lost Submissions / Unscored Submissions
-        unscored_submitted = [a for a in submitted_attempts if a.score is None]
-        unscored_count = len(unscored_submitted)
-
-        # 4. Invariant Check: Score Bounds & Answers Summary Structure
-        score_out_of_bounds = 0
+        # 3. Stream check answers_summary in chunks to audit structure & confidentiality
         summary_malformed = 0
         answer_key_leaks = 0
-
-        for a in submitted_attempts:
-            if a.score is not None:
-                if a.score < 0 or a.score > comp.question_count:
-                    score_out_of_bounds += 1
-
-            if not a.answers_summary or not isinstance(a.answers_summary, (dict, list)):
-                summary_malformed += 1
-            else:
-                summary_str = str(a.answers_summary)
-                if "correct_option" in summary_str or "correct_answer" in summary_str:
-                    answer_key_leaks += 1
+        offset = 0
+        chunk_size = 2500
+        while True:
+            chunk = (await db.execute(
+                select(ExamAttempt.answers_summary)
+                .where(ExamAttempt.competition_id == comp.id, ExamAttempt.status == AttemptStatus.SUBMITTED)
+                .offset(offset)
+                .limit(chunk_size)
+            )).scalars().all()
+            if not chunk:
+                break
+            for s in chunk:
+                if not s or not isinstance(s, (dict, list)):
+                    summary_malformed += 1
+                else:
+                    s_str = str(s)
+                    if "correct_option" in s_str or "correct_answer" in s_str:
+                        answer_key_leaks += 1
+            offset += chunk_size
 
         # Tabulate Results
         checks = [

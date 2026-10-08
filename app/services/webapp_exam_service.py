@@ -221,9 +221,13 @@ class WebAppExamService:
                     "results_published": comp.status == CompetitionStatus.PUBLISHED,
                 }
             attempt = existing_attempt
+            is_new_attempt = False
         else:
             # Case C: Start new attempt
-            attempt = await CompetitionService.start_attempt(db, comp.id, participant.id)
+            attempt = await CompetitionService.start_attempt(
+                db, comp.id, participant.id, comp=comp, skip_existing_check=True
+            )
+            is_new_attempt = True
 
         # 4. Fetch all questions in student's randomized order
         questions_payload = []
@@ -254,7 +258,7 @@ class WebAppExamService:
                     for qid, item in attempt.answers_summary.items()
                     if isinstance(item, dict) and "selected_display" in item
                 }
-            else:
+            elif not is_new_attempt:
                 ans_stmt = select(ParticipantAnswer).where(ParticipantAnswer.attempt_id == attempt.id)
                 saved_answers_list = list((await db.execute(ans_stmt)).scalars().all())
                 saved_answers = {
@@ -408,29 +412,14 @@ class WebAppExamService:
 
             disp_ord = entry["display_order"]
             persisted_answers_summary[str(q.id)] = {
+                "question_id": str(q.id),
                 "display_order": disp_ord,
                 "selected_display": selected_display_opt,
                 "canonical": canonical_opt,
                 "is_correct": is_correct,
             }
 
-            participant_answers_to_insert.append(
-                ParticipantAnswer(
-                    attempt_id=attempt.id,
-                    question_id=q.id,
-                    selected_display_option=selected_display_opt,
-                    resolved_canonical_option=canonical_opt,
-                    is_correct=is_correct,
-                    answered_at=now,
-                )
-            )
-
-        # Remove any previous answers for idempotent retry safety and bulk insert
-        await db.execute(delete(ParticipantAnswer).where(ParticipantAnswer.attempt_id == attempt.id))
-        if participant_answers_to_insert:
-            db.add_all(participant_answers_to_insert)
-
-        # 4. Finalize attempt in database
+        # 4. Finalize attempt in database atomically
         started = ensure_utc(attempt.started_at)
         completion_seconds = max(0.0, (now - started).total_seconds())
 
@@ -443,7 +432,6 @@ class WebAppExamService:
         attempt.answers_summary = persisted_answers_summary
 
         await db.commit()
-        await db.refresh(attempt)
 
         log_audit_event("WEBAPP_EXAM_SUBMITTED", "PARTICIPANT", str(attempt.participant_id), {
             "attempt_id": str(attempt.id),

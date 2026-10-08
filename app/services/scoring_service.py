@@ -26,7 +26,19 @@ class ScoringAndRankingService:
     @staticmethod
     async def score_attempt(db: AsyncSession, attempt: ExamAttempt) -> Tuple[int, int, int]:
         """Calculates score, correct count, incorrect count for an attempt."""
-        # Query all answers for this attempt
+        if attempt.score is not None:
+            return attempt.score, attempt.correct_count or attempt.score, attempt.incorrect_count or 0
+
+        if attempt.answers_summary and isinstance(attempt.answers_summary, dict):
+            correct_count = sum(1 for a in attempt.answers_summary.values() if isinstance(a, dict) and a.get("is_correct"))
+            incorrect_count = sum(1 for a in attempt.answers_summary.values() if isinstance(a, dict) and not a.get("is_correct"))
+            score = correct_count
+            attempt.score = score
+            attempt.correct_count = correct_count
+            attempt.incorrect_count = incorrect_count
+            return score, correct_count, incorrect_count
+
+        # Query all answers for this attempt (legacy fallback)
         stmt = select(ParticipantAnswer).where(ParticipantAnswer.attempt_id == attempt.id)
         res = await db.execute(stmt)
         answers = list(res.scalars().all())
@@ -371,7 +383,55 @@ class ScoringAndRankingService:
         if not attempt:
             raise CompetitionError("No attempt found for this participant")
 
-        # Query all answers for this attempt with question loaded
+        review_items = []
+        if attempt.answers_summary and isinstance(attempt.answers_summary, dict):
+            cached_qs = await CompetitionService.get_cached_competition_questions(db, competition_id)
+            q_map = {str(q.id): q for q in cached_qs}
+            sorted_entries = sorted(attempt.answers_summary.values(), key=lambda x: x.get("display_order", 0))
+
+            # Build sequence option mapping index if available
+            seq_map = {}
+            if attempt.question_sequence:
+                for item in attempt.question_sequence:
+                    seq_map[str(item.get("question_id"))] = item.get("option_mapping", {})
+
+            for ans_data in sorted_entries:
+                is_corr = bool(ans_data.get("is_correct"))
+                if review_type == "correct" and not is_corr:
+                    continue
+                if review_type == "incorrect" and is_corr:
+                    continue
+
+                q_id_str = str(ans_data.get("question_id", ""))
+                q = q_map.get(q_id_str)
+                if not q:
+                    continue
+
+                canonical_options = q.options or {}
+                mapping = seq_map.get(q_id_str, {})
+                display_correct = None
+                if mapping:
+                    for d_letter, c_letter in mapping.items():
+                        if c_letter == q.correct_option:
+                            display_correct = d_letter
+                            break
+
+                user_sel_display = ans_data.get("selected_display", "")
+                user_canonical = ans_data.get("canonical", "")
+                correct_text = canonical_options.get(q.correct_option, "")
+                user_selected_text = canonical_options.get(user_canonical, "")
+
+                review_items.append({
+                    "question_text": q.question_text,
+                    "is_correct": is_corr,
+                    "selected_display_option": user_sel_display,
+                    "user_answer_text": user_selected_text,
+                    "correct_display_option": display_correct or q.correct_option,
+                    "correct_answer_text": correct_text,
+                })
+            return review_items
+
+        # Query all answers for this attempt with question loaded (legacy fallback)
         ans_stmt = (
             select(ParticipantAnswer)
             .options(selectinload(ParticipantAnswer.question))
@@ -381,7 +441,6 @@ class ScoringAndRankingService:
         ans_res = await db.execute(ans_stmt)
         answers = list(ans_res.scalars().all())
 
-        review_items = []
         for ans in answers:
             if review_type == "correct" and not ans.is_correct:
                 continue

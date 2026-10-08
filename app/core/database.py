@@ -16,10 +16,12 @@ is_sqlite = settings.DATABASE_URL.startswith("sqlite")
 
 engine_kwargs = {"echo": settings.DEBUG}
 if not is_sqlite:
+    import os
     engine_kwargs.update(
         {
-            "pool_size": 20,
-            "max_overflow": 10,
+            "pool_size": int(os.getenv("DB_POOL_SIZE", "50")),
+            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "35")),
+            "pool_timeout": float(os.getenv("DB_POOL_TIMEOUT", "180.0")),
             "pool_pre_ping": True,
             "pool_recycle": 300,
             "connect_args": {
