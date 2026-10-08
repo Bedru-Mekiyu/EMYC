@@ -179,10 +179,10 @@ async def setup_benchmark_environment(num_participants: int, question_count: int
             title=f"Network Capacity Exam {str(comp_id)[:8]}",
             status=CompetitionStatus.LIVE,
             opens_at=now - timedelta(minutes=5),
-            closes_at=now + timedelta(minutes=55),
+            closes_at=now + timedelta(hours=4),
             actual_exam_started_at=now - timedelta(minutes=5),
-            actual_exam_ends_at=now + timedelta(minutes=55),
-            duration_minutes=60,
+            actual_exam_ends_at=now + timedelta(hours=4),
+            duration_minutes=240,
             question_count=question_count,
         )
         db.add(comp)
@@ -301,6 +301,12 @@ async def run_network_session_surge(
     return metrics, attempt_ids
 
 
+ANSWER_PATTERNS = [
+    [{"display_order": q_idx, "selected_option": ["A", "B", "C", "D"][(q_idx + offset) % 4]} for q_idx in range(1, 101)]
+    for offset in range(4)
+]
+
+
 async def run_network_submission_surge(
     client: AsyncClient,
     participants: List[Dict[str, Any]],
@@ -325,10 +331,7 @@ async def run_network_submission_surge(
             tg_id = p_info["telegram_user_id"]
             att_id = attempt_ids.get(tg_id)
             headers = {"X-Web-Auth-Token": p_info["token"]}
-            answers = [
-                {"display_order": q_idx, "selected_option": ["A", "B", "C", "D"][(q_idx + tg_id) % 4]}
-                for q_idx in range(1, 101)
-            ]
+            answers = ANSWER_PATTERNS[tg_id % 4]
             payload = {"attempt_id": att_id, "answers": answers}
 
             t0 = time.perf_counter()

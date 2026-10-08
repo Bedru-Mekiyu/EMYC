@@ -42,5 +42,6 @@ alembic upgrade head || echo "⚠️ Alembic upgrade finished with non-zero exit
 echo "==> Database migrations step completed."
 
 WORKERS="${WEB_CONCURRENCY:-2}"
-echo "==> Starting Uvicorn server on port ${PORT:-8000} with ${WORKERS} workers..."
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers "${WORKERS}"
+TIMEOUT_KEEPALIVE="${UVICORN_KEEP_ALIVE:-65}"
+echo "==> Starting Uvicorn server on port ${PORT:-8000} with ${WORKERS} workers (keep-alive: ${TIMEOUT_KEEPALIVE}s)..."
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers "${WORKERS}" --timeout-keep-alive "${TIMEOUT_KEEPALIVE}"
