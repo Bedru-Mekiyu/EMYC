@@ -225,38 +225,69 @@ class WebAppExamService:
             # Case C: Start new attempt
             attempt = await CompetitionService.start_attempt(db, comp.id, participant.id)
 
-        # 4. Fetch all questions in student's randomized order in a single query
-        orders_stmt = (
-            select(AttemptQuestionOrder)
-            .options(selectinload(AttemptQuestionOrder.question))
-            .where(AttemptQuestionOrder.attempt_id == attempt.id)
-            .order_by(AttemptQuestionOrder.display_order.asc())
-        )
-        orders = list((await db.execute(orders_stmt)).scalars().all())
-
-        # 5. Fetch any already answered questions
-        ans_stmt = select(ParticipantAnswer).where(ParticipantAnswer.attempt_id == attempt.id)
-        saved_answers_list = list((await db.execute(ans_stmt)).scalars().all())
-        saved_answers = {
-            str(a.question_id): a.selected_display_option for a in saved_answers_list
-        }
-
-        # 6. Build the client-ready questions array
+        # 4. Fetch all questions in student's randomized order
         questions_payload = []
-        for order in orders:
-            q = order.question
-            canonical_options = q.options or {}
-            # Map canonical option letters to randomized display letters (A, B, C, D)
-            displayed_options = {}
-            for display_letter, canon_letter in order.option_mapping.items():
-                displayed_options[display_letter] = canonical_options.get(canon_letter, "")
+        saved_answers = {}
 
-            questions_payload.append({
-                "display_order": order.display_order,
-                "question_id": str(q.id),
-                "question_text": q.question_text,
-                "options": displayed_options,
-            })
+        if attempt.question_sequence:
+            cached_qs = await CompetitionService.get_cached_competition_questions(db, comp.id)
+            q_map = {str(q.id): q for q in cached_qs}
+            for entry in attempt.question_sequence:
+                qid_str = str(entry["question_id"])
+                q = q_map.get(qid_str)
+                if not q:
+                    continue
+                canonical_options = q.options or {}
+                displayed_options = {}
+                for display_letter, canon_letter in entry.get("option_mapping", {}).items():
+                    displayed_options[display_letter] = canonical_options.get(canon_letter, "")
+                questions_payload.append({
+                    "display_order": entry.get("display_order"),
+                    "question_id": qid_str,
+                    "question_text": q.question_text,
+                    "options": displayed_options,
+                })
+
+            if attempt.answers_summary:
+                saved_answers = {
+                    qid: item["selected_display"]
+                    for qid, item in attempt.answers_summary.items()
+                    if isinstance(item, dict) and "selected_display" in item
+                }
+            else:
+                ans_stmt = select(ParticipantAnswer).where(ParticipantAnswer.attempt_id == attempt.id)
+                saved_answers_list = list((await db.execute(ans_stmt)).scalars().all())
+                saved_answers = {
+                    str(a.question_id): a.selected_display_option for a in saved_answers_list
+                }
+        else:
+            orders_stmt = (
+                select(AttemptQuestionOrder)
+                .options(selectinload(AttemptQuestionOrder.question))
+                .where(AttemptQuestionOrder.attempt_id == attempt.id)
+                .order_by(AttemptQuestionOrder.display_order.asc())
+            )
+            orders = list((await db.execute(orders_stmt)).scalars().all())
+
+            ans_stmt = select(ParticipantAnswer).where(ParticipantAnswer.attempt_id == attempt.id)
+            saved_answers_list = list((await db.execute(ans_stmt)).scalars().all())
+            saved_answers = {
+                str(a.question_id): a.selected_display_option for a in saved_answers_list
+            }
+
+            for order in orders:
+                q = order.question
+                canonical_options = q.options or {}
+                displayed_options = {}
+                for display_letter, canon_letter in order.option_mapping.items():
+                    displayed_options[display_letter] = canonical_options.get(canon_letter, "")
+
+                questions_payload.append({
+                    "display_order": order.display_order,
+                    "question_id": str(q.id),
+                    "question_text": q.question_text,
+                    "options": displayed_options,
+                })
 
         deadline_utc = ensure_utc(attempt.deadline_at)
         time_left_seconds = max(0, int((deadline_utc - now).total_seconds()))
@@ -317,14 +348,24 @@ class WebAppExamService:
             }
 
         # 2. Fetch question orders and option mappings for this attempt
-        q_order_stmt = (
-            select(AttemptQuestionOrder)
-            .options(selectinload(AttemptQuestionOrder.question))
-            .where(AttemptQuestionOrder.attempt_id == attempt.id)
-        )
-        q_orders = list((await db.execute(q_order_stmt)).scalars().all())
-        q_order_map = {str(qo.question_id): qo for qo in q_orders}
-        display_order_map = {qo.display_order: qo for qo in q_orders}
+        cached_qs = await CompetitionService.get_cached_competition_questions(db, attempt.competition_id)
+        q_map = {str(q.id): q for q in cached_qs}
+
+        if attempt.question_sequence:
+            q_order_map = {str(item["question_id"]): item for item in attempt.question_sequence}
+            display_order_map = {item["display_order"]: item for item in attempt.question_sequence}
+        else:
+            q_order_stmt = (
+                select(AttemptQuestionOrder)
+                .options(selectinload(AttemptQuestionOrder.question))
+                .where(AttemptQuestionOrder.attempt_id == attempt.id)
+            )
+            q_orders = list((await db.execute(q_order_stmt)).scalars().all())
+            q_order_map = {str(qo.question_id): {"display_order": qo.display_order, "question_id": str(qo.question_id), "option_mapping": qo.option_mapping} for qo in q_orders}
+            display_order_map = {qo.display_order: {"display_order": qo.display_order, "question_id": str(qo.question_id), "option_mapping": qo.option_mapping} for qo in q_orders}
+            for qo in q_orders:
+                if str(qo.question_id) not in q_map:
+                    q_map[str(qo.question_id)] = qo.question
 
         # 3. Process answers in a batch with zero lock contention
         correct_count = 0
@@ -341,17 +382,21 @@ class WebAppExamService:
             if not selected_display_opt:
                 continue
 
-            qo = None
+            entry = None
             if q_id_str and q_id_str in q_order_map:
-                qo = q_order_map[q_id_str]
+                entry = q_order_map[q_id_str]
             elif disp_order and disp_order in display_order_map:
-                qo = display_order_map[disp_order]
+                entry = display_order_map[disp_order]
 
-            if not qo:
+            if not entry:
                 continue
 
-            q = qo.question
-            canonical_opt = qo.option_mapping.get(selected_display_opt)
+            q = q_map.get(str(entry["question_id"]))
+            if not q:
+                continue
+
+            mapping = entry.get("option_mapping", {})
+            canonical_opt = mapping.get(selected_display_opt)
             if not canonical_opt:
                 continue
 
@@ -361,8 +406,9 @@ class WebAppExamService:
             else:
                 incorrect_count += 1
 
+            disp_ord = entry["display_order"]
             persisted_answers_summary[str(q.id)] = {
-                "display_order": qo.display_order,
+                "display_order": disp_ord,
                 "selected_display": selected_display_opt,
                 "canonical": canonical_opt,
                 "is_correct": is_correct,

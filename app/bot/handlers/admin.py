@@ -167,16 +167,22 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         submitted = 0
         in_progress = 0
         if comp:
-            attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
             admin_ids = get_settings().admin_ids
-            if admin_ids:
-                admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
-                attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
-            cand_attempts = list((await db.execute(attempts_stmt)).scalars().all())
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
 
-            started = len(cand_attempts)
-            submitted = sum(1 for a in cand_attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
-            in_progress = sum(1 for a in cand_attempts if a.status == AttemptStatus.IN_PROGRESS)
+            base_agg_stmt = select(
+                func.count(ExamAttempt.id).label("started"),
+                func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("submitted"),
+                func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))).label("in_progress"),
+            ).where(ExamAttempt.competition_id == comp.id)
+
+            if admin_p_sub is not None:
+                base_agg_stmt = base_agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+            agg_row = (await db.execute(base_agg_stmt)).one()
+            started = agg_row.started or 0
+            submitted = agg_row.submitted or 0
+            in_progress = agg_row.in_progress or 0
 
     text = get_text(
         "admin_menu_title",
@@ -273,17 +279,24 @@ async def cb_admin_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         total_p = await ParticipantService.get_registered_participants_count(db, exclude_admins=True)
 
         # Attempt metrics for this competition (excluding administrators)
-        attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
         admin_ids = get_settings().admin_ids
-        if admin_ids:
-            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
-            attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
-        attempts = list((await db.execute(attempts_stmt)).scalars().all())
+        admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
 
-        started = len(attempts)
-        submitted = sum(1 for a in attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
-        in_progress = sum(1 for a in attempts if a.status == AttemptStatus.IN_PROGRESS)
-        expired = sum(1 for a in attempts if a.status == AttemptStatus.EXPIRED)
+        base_agg_stmt = select(
+            func.count(ExamAttempt.id).label("started"),
+            func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("submitted"),
+            func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))).label("in_progress"),
+            func.count(case((ExamAttempt.status == AttemptStatus.EXPIRED, 1))).label("expired"),
+        ).where(ExamAttempt.competition_id == comp.id)
+
+        if admin_p_sub is not None:
+            base_agg_stmt = base_agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+        agg_row = (await db.execute(base_agg_stmt)).one()
+        started = agg_row.started or 0
+        submitted = agg_row.submitted or 0
+        in_progress = agg_row.in_progress or 0
+        expired = agg_row.expired or 0
         not_started = max(0, total_p - started)
 
     status_text = (
@@ -1119,22 +1132,28 @@ async def cb_admin_participants(update: Update, context: ContextTypes.DEFAULT_TY
         completion_pct = 0.0
 
         if comp:
-            attempts_stmt = select(ExamAttempt).where(ExamAttempt.competition_id == comp.id)
             admin_ids = get_settings().admin_ids
-            if admin_ids:
-                admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids))
-                attempts_stmt = attempts_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
-            attempts = list((await db.execute(attempts_stmt)).scalars().all())
+            admin_p_sub = select(Participant.id).where(Participant.telegram_user_id.in_(admin_ids)) if admin_ids else None
 
-            started = len(attempts)
-            submitted = sum(1 for a in attempts if a.status in [AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED])
-            in_progress = sum(1 for a in attempts if a.status == AttemptStatus.IN_PROGRESS)
-            expired = sum(1 for a in attempts if a.status == AttemptStatus.EXPIRED)
+            base_agg_stmt = select(
+                func.count(ExamAttempt.id).label("started"),
+                func.count(case((ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.FINALIZED]), 1))).label("submitted"),
+                func.count(case((ExamAttempt.status == AttemptStatus.IN_PROGRESS, 1))).label("in_progress"),
+                func.count(case((ExamAttempt.status == AttemptStatus.EXPIRED, 1))).label("expired"),
+                func.coalesce(func.avg(case((ExamAttempt.score.isnot(None), ExamAttempt.score))), 0.0).label("avg_score"),
+                func.max(ExamAttempt.score).label("top_score"),
+            ).where(ExamAttempt.competition_id == comp.id)
 
-            finished_scores = [a.score for a in attempts if a.score is not None]
-            if finished_scores:
-                avg_score = round(sum(finished_scores) / len(finished_scores), 1)
-                top_score = max(finished_scores)
+            if admin_p_sub is not None:
+                base_agg_stmt = base_agg_stmt.where(ExamAttempt.participant_id.notin_(admin_p_sub))
+
+            agg_row = (await db.execute(base_agg_stmt)).one()
+            started = agg_row.started or 0
+            submitted = agg_row.submitted or 0
+            in_progress = agg_row.in_progress or 0
+            expired = agg_row.expired or 0
+            avg_score = round(float(agg_row.avg_score or 0.0), 1)
+            top_score = agg_row.top_score or 0
 
             if started > 0:
                 completion_pct = round((submitted / started) * 100, 1)

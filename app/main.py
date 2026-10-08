@@ -31,7 +31,12 @@ async def lifespan(app: FastAPI):
                 await conn.execute(text("ALTER TABLE competitions ADD COLUMN IF NOT EXISTS actual_exam_ends_at TIMESTAMPTZ;"))
                 await conn.execute(text("ALTER TABLE participants ADD COLUMN IF NOT EXISTS full_name VARCHAR(255);"))
                 await conn.execute(text("ALTER TABLE participants ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);"))
-            logger.info("Database schema migration: verified all essential table columns exist.")
+                # Composite performance indexes
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_comp_status ON exam_attempts (competition_id, status);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_status_deadline ON exam_attempts (status, deadline_at);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_comp_score_time ON exam_attempts (competition_id, score, completion_seconds);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_comp_questions_comp_order ON competition_questions (competition_id, order_index);"))
+            logger.info("Database schema migration: verified all essential table columns and indexes exist.")
     except Exception as e:
         logger.error(f"Error during database schema migration: {e}", exc_info=True)
 

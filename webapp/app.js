@@ -456,10 +456,14 @@
     showView('exam');
   }
 
-  // 6. Countdown Timer
+  // 6. Countdown Timer (Strictly synchronized to authoritative server epoch)
   function setupCountdown(timeLeftSeconds) {
     if (timerInterval) clearInterval(timerInterval);
-    deadlineEpoch = Date.now() + timeLeftSeconds * 1000;
+    if (!isPracticeMode && session?.deadline_at) {
+      deadlineEpoch = new Date(session.deadline_at).getTime();
+    } else {
+      deadlineEpoch = Date.now() + timeLeftSeconds * 1000;
+    }
 
     function tick() {
       const now = Date.now();

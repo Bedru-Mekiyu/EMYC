@@ -41,5 +41,6 @@ echo "==> Running database migrations (alembic upgrade head)..."
 alembic upgrade head || echo "⚠️ Alembic upgrade finished with non-zero exit code. Continuing to application startup (self-healing schema migrations will run in lifespan)..."
 echo "==> Database migrations step completed."
 
-echo "==> Starting Uvicorn server on port ${PORT:-8000}..."
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+WORKERS="${WEB_CONCURRENCY:-2}"
+echo "==> Starting Uvicorn server on port ${PORT:-8000} with ${WORKERS} workers..."
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers "${WORKERS}"

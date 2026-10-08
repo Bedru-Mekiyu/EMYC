@@ -1177,12 +1177,21 @@ async def cb_exam_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         # Fetch questions and answers
-        order_stmt = (
-            select(AttemptQuestionOrder.display_order, AttemptQuestionOrder.question_id)
-            .where(AttemptQuestionOrder.attempt_id == attempt_id)
-            .order_by(AttemptQuestionOrder.display_order.asc())
-        )
-        orders = (await db.execute(order_stmt)).all()
+        if attempt.question_sequence:
+            orders = [
+                (
+                    item["display_order"],
+                    uuid.UUID(item["question_id"]) if isinstance(item["question_id"], str) else item["question_id"]
+                )
+                for item in sorted(attempt.question_sequence, key=lambda x: x.get("display_order", 0))
+            ]
+        else:
+            order_stmt = (
+                select(AttemptQuestionOrder.display_order, AttemptQuestionOrder.question_id)
+                .where(AttemptQuestionOrder.attempt_id == attempt_id)
+                .order_by(AttemptQuestionOrder.display_order.asc())
+            )
+            orders = (await db.execute(order_stmt)).all()
         total_questions = len(orders)
 
         ans_stmt = (

@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     Enum,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
@@ -79,6 +80,10 @@ class ExamAttempt(Base):
         UniqueConstraint(
             "competition_id", "participant_id", name="uq_competition_participant_attempt"
         ),
+        # High-concurrency composite indexes
+        Index("ix_exam_attempts_comp_status", "competition_id", "status"),
+        Index("ix_exam_attempts_status_deadline", "status", "deadline_at"),
+        Index("ix_exam_attempts_comp_score_time", "competition_id", "score", "completion_seconds"),
     )
 
     # Relationships

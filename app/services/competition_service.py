@@ -32,6 +32,16 @@ ALLOWED_TRANSITIONS = {
     CompetitionStatus.ARCHIVED: [],
 }
 
+# High-concurrency in-memory question cache for immutable LIVE competitions
+_COMP_QUESTIONS_CACHE: Dict[uuid.UUID, List[CompetitionQuestion]] = {}
+
+def clear_competition_questions_cache(comp_id: Optional[uuid.UUID] = None) -> None:
+    """Invalidates the in-memory cache for competition questions."""
+    if comp_id:
+        _COMP_QUESTIONS_CACHE.pop(comp_id, None)
+    else:
+        _COMP_QUESTIONS_CACHE.clear()
+
 
 class CompetitionError(Exception):
     """Base competition domain exception."""
@@ -268,6 +278,7 @@ class CompetitionService:
                 "policy": policy,
             })
 
+        clear_competition_questions_cache(comp.id)
         comp.status = new_status
         await db.commit()
         await db.refresh(comp)
@@ -406,6 +417,25 @@ class CompetitionService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_cached_competition_questions(
+        db: AsyncSession, competition_id: uuid.UUID
+    ) -> List[CompetitionQuestion]:
+        """High-concurrency question retrieval with in-memory caching for immutable LIVE questions."""
+        if competition_id in _COMP_QUESTIONS_CACHE:
+            return _COMP_QUESTIONS_CACHE[competition_id]
+
+        stmt = (
+            select(CompetitionQuestion)
+            .where(CompetitionQuestion.competition_id == competition_id)
+            .order_by(CompetitionQuestion.order_index)
+        )
+        res = await db.execute(stmt)
+        questions = list(res.scalars().all())
+        if questions:
+            _COMP_QUESTIONS_CACHE[competition_id] = questions
+        return questions
+
+    @staticmethod
     async def start_attempt(
         db: AsyncSession,
         competition_id: uuid.UUID,
@@ -446,7 +476,6 @@ class CompetitionService:
             raise DuplicateAttemptError("Participant already has an official attempt for this competition")
 
         # 3. Calculate authoritative global deadline
-        # ONE GLOBAL TIMER for all participants:
         if comp.actual_exam_ends_at:
             deadline_at = ensure_utc(comp.actual_exam_ends_at)
         else:
@@ -466,15 +495,8 @@ class CompetitionService:
             await db.rollback()
             raise DuplicateAttemptError("Participant already has an official attempt for this competition")
 
-        # 4. Fetch competition questions
-        q_stmt = (
-            select(CompetitionQuestion)
-            .where(CompetitionQuestion.competition_id == competition_id)
-            .order_by(CompetitionQuestion.order_index)
-        )
-        q_res = await db.execute(q_stmt)
-        questions = list(q_res.scalars().all())
-
+        # 4. Fetch competition questions (cached in-memory)
+        questions = await CompetitionService.get_cached_competition_questions(db, competition_id)
         if not questions:
             raise CompetitionError("No questions configured for this competition")
 
@@ -482,21 +504,20 @@ class CompetitionService:
         shuffled_questions = list(questions)
         random.shuffle(shuffled_questions)
 
-        # 6. Option randomization per question and mapping persistence
+        # 6. Option randomization per question and high-concurrency sequence persistence
         option_keys = ["A", "B", "C", "D"]
+        question_sequence = []
         for display_idx, q in enumerate(shuffled_questions, start=1):
             shuffled_keys = list(option_keys)
             random.shuffle(shuffled_keys)
-            # mapping: display letter -> canonical option letter
             mapping = {display_letter: canon_letter for display_letter, canon_letter in zip(option_keys, shuffled_keys)}
+            question_sequence.append({
+                "display_order": display_idx,
+                "question_id": str(q.id),
+                "option_mapping": mapping,
+            })
 
-            order_entry = AttemptQuestionOrder(
-                attempt_id=attempt.id,
-                display_order=display_idx,
-                question_id=q.id,
-                option_mapping=mapping,
-            )
-            db.add(order_entry)
+        attempt.question_sequence = question_sequence
 
         try:
             await db.commit()
@@ -535,25 +556,46 @@ class CompetitionService:
             await CompetitionService.auto_submit_expired_attempt(db, attempt)
             raise AttemptExpiredError("Exam time has expired")
 
-        stmt = (
-            select(AttemptQuestionOrder)
-            .options(selectinload(AttemptQuestionOrder.question))
-            .where(
-                and_(
-                    AttemptQuestionOrder.attempt_id == attempt_id,
-                    AttemptQuestionOrder.display_order == display_order,
+        q = None
+        mapping = None
+        total_q = 0
+        if attempt.question_sequence:
+            seq_item = next((item for item in attempt.question_sequence if item.get("display_order") == display_order), None)
+            if not seq_item:
+                raise CompetitionError(f"Question {display_order} not found for this attempt")
+            q_id = uuid.UUID(seq_item["question_id"]) if isinstance(seq_item["question_id"], str) else seq_item["question_id"]
+            cached_qs = await CompetitionService.get_cached_competition_questions(db, attempt.competition_id)
+            q = next((item for item in cached_qs if item.id == q_id), None)
+            if not q:
+                q = await db.get(CompetitionQuestion, q_id)
+            if not q:
+                raise CompetitionError(f"Question {display_order} not found for this attempt")
+            mapping = seq_item.get("option_mapping", {})
+            total_q = len(attempt.question_sequence)
+        else:
+            stmt = (
+                select(AttemptQuestionOrder)
+                .options(selectinload(AttemptQuestionOrder.question))
+                .where(
+                    and_(
+                        AttemptQuestionOrder.attempt_id == attempt_id,
+                        AttemptQuestionOrder.display_order == display_order,
+                    )
                 )
             )
-        )
-        res = await db.execute(stmt)
-        order_entry = res.scalar_one_or_none()
-        if not order_entry:
-            raise CompetitionError(f"Question {display_order} not found for this attempt")
+            res = await db.execute(stmt)
+            order_entry = res.scalar_one_or_none()
+            if not order_entry:
+                raise CompetitionError(f"Question {display_order} not found for this attempt")
 
-        q = order_entry.question
-        # Canonical options from question: {"A": "text A", "B": "text B", ...}
-        canonical_options = q.options
-        mapping = order_entry.option_mapping  # {"A": "C", "B": "A", ...}
+            q = order_entry.question
+            mapping = order_entry.option_mapping
+            count_stmt = select(func.count(AttemptQuestionOrder.id)).where(
+                AttemptQuestionOrder.attempt_id == attempt_id
+            )
+            total_q = (await db.execute(count_stmt)).scalar() or 0
+
+        canonical_options = q.options or {}
 
         # Build randomized options as participant sees them:
         display_options = {}
@@ -569,12 +611,6 @@ class CompetitionService:
         )
         ans_res = await db.execute(ans_stmt)
         existing_ans = ans_res.scalar_one_or_none()
-
-        # Count total questions for this attempt
-        count_stmt = select(func.count(AttemptQuestionOrder.id)).where(
-            AttemptQuestionOrder.attempt_id == attempt_id
-        )
-        total_q = (await db.execute(count_stmt)).scalar() or 0
 
         time_left_seconds = max(0, int((deadline - now).total_seconds()))
 
@@ -617,26 +653,52 @@ class CompetitionService:
             raise AttemptExpiredError("Exam deadline has passed")
 
         # Retrieve mapping for this question by question_id or display_order
-        where_clause = [AttemptQuestionOrder.attempt_id == attempt_id]
-        if question_id is not None:
-            where_clause.append(AttemptQuestionOrder.question_id == question_id)
-        elif display_order is not None:
-            where_clause.append(AttemptQuestionOrder.display_order == display_order)
+        resolved_q_id = None
+        mapping = None
+        q = None
+        if attempt.question_sequence:
+            seq_item = None
+            if question_id is not None:
+                str_qid = str(question_id)
+                seq_item = next((item for item in attempt.question_sequence if str(item.get("question_id")) == str_qid), None)
+            elif display_order is not None:
+                seq_item = next((item for item in attempt.question_sequence if item.get("display_order") == display_order), None)
+            else:
+                raise CompetitionError("Either question_id or display_order must be provided")
+
+            if not seq_item:
+                raise CompetitionError("Question does not belong to this attempt")
+
+            resolved_q_id = uuid.UUID(seq_item["question_id"]) if isinstance(seq_item["question_id"], str) else seq_item["question_id"]
+            mapping = seq_item.get("option_mapping", {})
+            cached_qs = await CompetitionService.get_cached_competition_questions(db, attempt.competition_id)
+            q = next((item for item in cached_qs if item.id == resolved_q_id), None)
+            if not q:
+                q = await db.get(CompetitionQuestion, resolved_q_id)
+            if not q:
+                raise CompetitionError("Question does not belong to this attempt")
         else:
-            raise CompetitionError("Either question_id or display_order must be provided")
+            where_clause = [AttemptQuestionOrder.attempt_id == attempt_id]
+            if question_id is not None:
+                where_clause.append(AttemptQuestionOrder.question_id == question_id)
+            elif display_order is not None:
+                where_clause.append(AttemptQuestionOrder.display_order == display_order)
+            else:
+                raise CompetitionError("Either question_id or display_order must be provided")
 
-        mapping_stmt = (
-            select(AttemptQuestionOrder)
-            .options(selectinload(AttemptQuestionOrder.question))
-            .where(and_(*where_clause))
-        )
-        m_res = await db.execute(mapping_stmt)
-        order_entry = m_res.scalar_one_or_none()
-        if not order_entry:
-            raise CompetitionError("Question does not belong to this attempt")
+            mapping_stmt = (
+                select(AttemptQuestionOrder)
+                .options(selectinload(AttemptQuestionOrder.question))
+                .where(and_(*where_clause))
+            )
+            m_res = await db.execute(mapping_stmt)
+            order_entry = m_res.scalar_one_or_none()
+            if not order_entry:
+                raise CompetitionError("Question does not belong to this attempt")
 
-        resolved_q_id = order_entry.question_id
-        q = order_entry.question
+            resolved_q_id = order_entry.question_id
+            q = order_entry.question
+            mapping = order_entry.option_mapping
 
         # Check if answer already exists (idempotency)
         existing_stmt = select(ParticipantAnswer).where(
@@ -653,7 +715,7 @@ class CompetitionService:
                     "status": "already_recorded",
                     "selected_display_option": existing_answer.selected_display_option,
                 }
-            canonical_option = order_entry.option_mapping.get(selected_display_option)
+            canonical_option = mapping.get(selected_display_option)
             if not canonical_option:
                 raise CompetitionError(f"Invalid option selection: {selected_display_option}")
             existing_answer.selected_display_option = selected_display_option
@@ -666,7 +728,7 @@ class CompetitionService:
                 "selected_display_option": selected_display_option,
             }
 
-        canonical_option = order_entry.option_mapping.get(selected_display_option)
+        canonical_option = mapping.get(selected_display_option)
         if not canonical_option:
             raise CompetitionError(f"Invalid option selection: {selected_display_option}")
 

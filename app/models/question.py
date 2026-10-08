@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any
-from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, JSON, text
+from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, JSON, text, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -34,6 +34,10 @@ class CompetitionQuestion(Base):
         default=lambda: datetime.now(timezone.utc),
         server_default=text("now()"),
         nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_comp_questions_comp_order", "competition_id", "order_index"),
     )
 
     # Relationships

@@ -41,6 +41,8 @@ htmlcov/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 
 .pg_test_data/

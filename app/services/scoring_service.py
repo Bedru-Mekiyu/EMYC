@@ -110,10 +110,10 @@ class ScoringAndRankingService:
                 a_att.rank = None
                 a_att.status = AttemptStatus.FINALIZED
 
-        # 3. Score all attempts
+        # 3. Score all attempts (only if not already computed at submission)
         for attempt in attempts:
-            # Compute score
-            await ScoringAndRankingService.score_attempt(db, attempt)
+            if attempt.score is None:
+                await ScoringAndRankingService.score_attempt(db, attempt)
 
         # 4. Deterministic ranking:
         # Sort key:
@@ -261,28 +261,43 @@ class ScoringAndRankingService:
             raise CompetitionError("No attempt found for this participant")
 
 
-        # 1. Total questions for this attempt
-        tot_q_stmt = select(func.count(AttemptQuestionOrder.id)).where(
-            AttemptQuestionOrder.attempt_id == attempt.id
-        )
-        total_questions = (await db.execute(tot_q_stmt)).scalar() or comp.question_count
+        # 1. Total questions and specific question resolution
+        total_questions = comp.question_count
+        q = None
+        mapping = None
+        if attempt.question_sequence:
+            total_questions = len(attempt.question_sequence)
+            seq_item = next((item for item in attempt.question_sequence if item.get("display_order") == display_order), None)
+            if not seq_item:
+                raise CompetitionError(f"Question order {display_order} not found for this attempt")
+            q_id = uuid.UUID(seq_item["question_id"]) if isinstance(seq_item["question_id"], str) else seq_item["question_id"]
+            q = await db.get(CompetitionQuestion, q_id)
+            if not q:
+                raise CompetitionError(f"Question order {display_order} not found for this attempt")
+            mapping = seq_item.get("option_mapping", {})
+        else:
+            tot_q_stmt = select(func.count(AttemptQuestionOrder.id)).where(
+                AttemptQuestionOrder.attempt_id == attempt.id
+            )
+            total_questions = (await db.execute(tot_q_stmt)).scalar() or comp.question_count
 
-        # 2. Get the specific question in the participant's personal display order
-        order_stmt = (
-            select(AttemptQuestionOrder)
-            .options(selectinload(AttemptQuestionOrder.question))
-            .where(
-                and_(
-                    AttemptQuestionOrder.attempt_id == attempt.id,
-                    AttemptQuestionOrder.display_order == display_order,
+            # 2. Get the specific question in the participant's personal display order
+            order_stmt = (
+                select(AttemptQuestionOrder)
+                .options(selectinload(AttemptQuestionOrder.question))
+                .where(
+                    and_(
+                        AttemptQuestionOrder.attempt_id == attempt.id,
+                        AttemptQuestionOrder.display_order == display_order,
+                    )
                 )
             )
-        )
-        order_entry = (await db.execute(order_stmt)).scalar_one_or_none()
-        if not order_entry:
-            raise CompetitionError(f"Question order {display_order} not found for this attempt")
+            order_entry = (await db.execute(order_stmt)).scalar_one_or_none()
+            if not order_entry:
+                raise CompetitionError(f"Question order {display_order} not found for this attempt")
 
-        q = order_entry.question
+            q = order_entry.question
+            mapping = order_entry.option_mapping
         canonical_options = q.options  # {"A": "text A", "B": "text B", ...}
 
         # Build displayed options dictionary: {"A": text, "B": text, ...}
@@ -377,19 +392,28 @@ class ScoringAndRankingService:
             canonical_options = q.options  # {"A": "text A", ...}
 
             # Retrieve option mapping for this question in this attempt to display choices clearly
-            map_stmt = select(AttemptQuestionOrder).where(
-                and_(
-                    AttemptQuestionOrder.attempt_id == attempt.id,
-                    AttemptQuestionOrder.question_id == q.id,
-                )
-            )
-            map_res = await db.execute(map_stmt)
-            order_entry = map_res.scalar_one_or_none()
-
             display_correct = None
-            if order_entry:
+            mapping = None
+            if attempt.question_sequence:
+                str_qid = str(q.id)
+                seq_item = next((item for item in attempt.question_sequence if str(item.get("question_id")) == str_qid), None)
+                if seq_item:
+                    mapping = seq_item.get("option_mapping", {})
+            else:
+                map_stmt = select(AttemptQuestionOrder).where(
+                    and_(
+                        AttemptQuestionOrder.attempt_id == attempt.id,
+                        AttemptQuestionOrder.question_id == q.id,
+                    )
+                )
+                map_res = await db.execute(map_stmt)
+                order_entry = map_res.scalar_one_or_none()
+                if order_entry:
+                    mapping = order_entry.option_mapping
+
+            if mapping:
                 # Find which displayed letter corresponded to q.correct_option
-                for d_letter, c_letter in order_entry.option_mapping.items():
+                for d_letter, c_letter in mapping.items():
                     if c_letter == q.correct_option:
                         display_correct = d_letter
                         break
