@@ -202,13 +202,7 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.ecs_app.id]
   }
 
-  egress {
-    description = "Zero egress required for isolated database"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # Zero egress rules defined: PostgreSQL requires zero outbound egress (purely stateful server)
 
   tags = {
     Name = "emyc-staging-rds-sg"

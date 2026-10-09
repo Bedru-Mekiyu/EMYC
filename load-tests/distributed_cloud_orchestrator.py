@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -115,7 +116,21 @@ async def main():
     parser = argparse.ArgumentParser(description="EMYC Distributed Cloud Capacity Benchmark Orchestrator")
     parser.add_argument("--target-url", default="http://127.0.0.1:8080", help="Staging ALB target endpoint URL")
     parser.add_argument("--stage", default="1k", choices=["1k", "10k", "25k", "50k", "75k", "100k", "all"], help="Stage to execute")
+    parser.add_argument("--worker-id", type=int, default=0, help="0-indexed worker ID for distributed execution")
+    parser.add_argument("--total-workers", type=int, default=1, help="Total distributed worker nodes (e.g. 8 for 100k)")
+    parser.add_argument("--sync-epoch", type=float, default=0.0, help="Target UTC epoch seconds to fire synchronized burst")
     args = parser.parse_args()
+
+    # NTP Clock Synchronization Check
+    if args.sync_epoch > 0:
+        now = time.time()
+        wait_sec = args.sync_epoch - now
+        if wait_sec > 0:
+            logger.info(f"[NTP SYNC] Worker {args.worker_id}/{args.total_workers} synchronizing to epoch {args.sync_epoch}. Sleeping {wait_sec:.2f}s...")
+            await asyncio.sleep(wait_sec)
+            logger.info(f"[NTP SYNC] Sync epoch reached. Firing synchronized wave at {datetime.now(timezone.utc).isoformat()}!")
+        else:
+            logger.warning(f"[NTP SYNC] Target sync epoch {args.sync_epoch} already passed by {-wait_sec:.2f}s. Firing immediately.")
 
     stages_to_run = (
         ["1k", "10k", "25k", "50k", "75k", "100k"]
@@ -125,7 +140,12 @@ async def main():
 
     stage_reports = []
     for s_name in stages_to_run:
-        cfg = STAGE_CONFIGURATIONS[s_name]
+        cfg = STAGE_CONFIGURATIONS[s_name].copy()
+        # Scale partitioned for distributed workers
+        if args.total_workers > 1:
+            cfg["scale"] = cfg["scale"] // args.total_workers
+            logger.info(f"[DISTRIBUTED] Worker {args.worker_id} assigned slice: {cfg['scale']:,} examinees")
+
         rep = await run_single_stage(args.target_url, s_name, cfg)
         stage_reports.append(rep)
         if not rep["sla_passed"]:
@@ -133,7 +153,7 @@ async def main():
             break
 
     print("\n" + "=" * 80)
-    print(" EMYC CLOUD CAPACITY VALIDATION SUMMARY REPORT")
+    print(f" EMYC CLOUD CAPACITY VALIDATION SUMMARY REPORT (Worker {args.worker_id}/{args.total_workers})")
     print("=" * 80)
     print(json.dumps(stage_reports, indent=2))
 

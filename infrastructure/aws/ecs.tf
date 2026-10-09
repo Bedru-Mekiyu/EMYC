@@ -92,10 +92,17 @@ resource "aws_ecs_task_definition" "app" {
         { name = "BOT_MODE", value = "disabled" }, # Bot disabled during load benchmark
         { name = "DATABASE_URL", value = "postgresql+asyncpg://${var.db_username}:${var.db_password}@${aws_db_instance.staging_db.endpoint}/${var.db_name}" },
         { name = "DATABASE_SYNC_URL", value = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.staging_db.endpoint}/${var.db_name}" },
-        { name = "WEB_CONCURRENCY", value = "4" }, # 4 Uvicorn workers per task
+        # Connection Budget & CPU Sizing Calibration:
+        # Task has 2 vCPUs (2048 units). Setting WEB_CONCURRENCY=2 assigns 1 worker per physical vCPU,
+        # preventing CPU context switching churn during CPU-intensive exam scoring loops.
+        # Pool math: 2 workers * (12 pool + 3 overflow) = 30 connections/task.
+        # At max scale (32 tasks): 32 * 30 = 960 connections max.
+        # Against RDS max_connections = 1200, this guarantees 240 connections (20%) reserved
+        # for autovacuum, RDS Enhanced Monitoring agent, Alembic migrations, and emergency admin.
+        { name = "WEB_CONCURRENCY", value = "2" },
         { name = "UVICORN_KEEP_ALIVE", value = "65" },
-        { name = "DB_POOL_SIZE", value = "10" },
-        { name = "DB_MAX_OVERFLOW", value = "2" },
+        { name = "DB_POOL_SIZE", value = "12" },
+        { name = "DB_MAX_OVERFLOW", value = "3" },
         { name = "DB_POOL_TIMEOUT", value = "180.0" },
       ]
 

@@ -11,7 +11,7 @@ resource "aws_db_parameter_group" "pg16_tuned" {
 
   parameter {
     name  = "shared_buffers"
-    value = "{DBInstanceClassMemory/4096}" # 4 GB shared buffers on 16 GB instance
+    value = "{DBInstanceClassMemory/32768}" # 4 GB shared buffers (25% of 16 GB RAM in 8KB blocks)
   }
 
   parameter {
@@ -26,7 +26,7 @@ resource "aws_db_parameter_group" "pg16_tuned" {
 
   parameter {
     name  = "wal_buffers"
-    value = "32768" # 32 MB
+    value = "2048" # 16 MB (2048 * 8KB)
   }
 
   parameter {
