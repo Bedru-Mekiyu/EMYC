@@ -23,13 +23,13 @@ variable "db_instance_class" {
 }
 
 variable "db_allocated_storage" {
-  description = "Allocated storage in GB for RDS"
+  description = "Allocated storage in GB for RDS. Set to 400 GiB to satisfy the AWS RDS PostgreSQL gp3 striping threshold (which automatically provisions 12,000 IOPS and 500 MB/s baseline at zero surcharge)"
   type        = number
-  default     = 100
+  default     = 400
 }
 
 variable "db_iops" {
-  description = "Provisioned IOPS for gp3 storage"
+  description = "Provisioned IOPS for gp3 storage (included at 400 GiB threshold)"
   type        = number
   default     = 12000
 }

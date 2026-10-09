@@ -302,16 +302,23 @@ async def run_synchronized_submission_burst(
 async def execute_synchronized_burst_suite(
     base_url: str = "http://127.0.0.1:8080",
     max_burst_size: int = 10000,
+    comp_id: Optional[uuid.UUID] = None,
+    participant_offset: int = 0,
 ) -> Dict[str, Any]:
     """Runs progressive synchronized arrival bursts and final synchronized submission burst."""
     print("\n" + "=" * 80)
     print(f" EXECUTING EMYC SYNCHRONIZED BURST BENCHMARK SUITE")
-    print(f" Target Endpoint: {base_url} | Max Burst Size: {max_burst_size:,}")
+    print(f" Target Endpoint: {base_url} | Max Burst Size: {max_burst_size:,} | Offset: {participant_offset:,}")
     print("=" * 80)
 
     # Initial telemetry
     from network_load_engine import setup_benchmark_environment, get_db_telemetry
-    comp_id, participants = await setup_benchmark_environment(max_burst_size, question_count=100)
+    comp_id, participants = await setup_benchmark_environment(
+        num_participants=max_burst_size,
+        question_count=100,
+        comp_id=comp_id,
+        participant_offset=participant_offset,
+    )
 
     sampler = DatabasePeakSampler(interval_sec=0.5)
     sampler.start()

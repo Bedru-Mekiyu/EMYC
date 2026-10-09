@@ -12,8 +12,9 @@ import logging
 import os
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -39,10 +40,16 @@ STAGE_CONFIGURATIONS = {
 }
 
 
-async def run_single_stage(target_url: str, stage_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+async def run_single_stage(
+    target_url: str,
+    stage_name: str,
+    config: Dict[str, Any],
+    comp_id: Optional[uuid.UUID] = None,
+    participant_offset: int = 0,
+) -> Dict[str, Any]:
     scale = config["scale"]
     logger.info("=" * 80)
-    logger.info(f" EXECUTING CLOUD STAGE: {stage_name.upper()} ({scale:,} EXAMINEES)")
+    logger.info(f" EXECUTING CLOUD STAGE: {stage_name.upper()} ({scale:,} EXAMINEES | OFFSET: {participant_offset:,})")
     logger.info(f" Target Endpoint: {target_url}")
     logger.info("=" * 80)
 
@@ -51,6 +58,8 @@ async def run_single_stage(target_url: str, stage_name: str, config: Dict[str, A
     results = await execute_synchronized_burst_suite(
         base_url=target_url,
         max_burst_size=scale,
+        comp_id=comp_id,
+        participant_offset=participant_offset,
     )
     duration = time.perf_counter() - t0
     comp_id = results.get("competition_id")
@@ -119,7 +128,10 @@ async def main():
     parser.add_argument("--worker-id", type=int, default=0, help="0-indexed worker ID for distributed execution")
     parser.add_argument("--total-workers", type=int, default=1, help="Total distributed worker nodes (e.g. 8 for 100k)")
     parser.add_argument("--sync-epoch", type=float, default=0.0, help="Target UTC epoch seconds to fire synchronized burst")
+    parser.add_argument("--comp-id", type=str, default=None, help="Shared Competition UUID for multi-worker distributed test")
     args = parser.parse_args()
+
+    comp_uuid = uuid.UUID(args.comp_id) if args.comp_id else None
 
     # NTP Clock Synchronization Check
     if args.sync_epoch > 0:
@@ -142,11 +154,19 @@ async def main():
     for s_name in stages_to_run:
         cfg = STAGE_CONFIGURATIONS[s_name].copy()
         # Scale partitioned for distributed workers
-        if args.total_workers > 1:
-            cfg["scale"] = cfg["scale"] // args.total_workers
-            logger.info(f"[DISTRIBUTED] Worker {args.worker_id} assigned slice: {cfg['scale']:,} examinees")
+        total_scale = cfg["scale"]
+        slice_scale = total_scale // args.total_workers if args.total_workers > 1 else total_scale
+        participant_offset = args.worker_id * slice_scale if args.total_workers > 1 else 0
+        cfg["scale"] = slice_scale
+        logger.info(f"[DISTRIBUTED] Worker {args.worker_id}/{args.total_workers} assigned slice: {slice_scale:,} examinees (offset: {participant_offset:,})")
 
-        rep = await run_single_stage(args.target_url, s_name, cfg)
+        rep = await run_single_stage(
+            target_url=args.target_url,
+            stage_name=s_name,
+            config=cfg,
+            comp_id=comp_uuid,
+            participant_offset=participant_offset,
+        )
         stage_reports.append(rep)
         if not rep["sla_passed"]:
             logger.error(f"[CIRCUIT BREAKER] Stage {s_name} failed SLA. Halting progression to protect environment.")

@@ -214,10 +214,16 @@ async def get_db_telemetry() -> Dict[str, Any]:
             return {"db_type": "PostgreSQL", "active_connections": 0}
 
 
-async def setup_benchmark_environment(num_participants: int, question_count: int = 100) -> Tuple[uuid.UUID, List[Dict[str, Any]]]:
-    """Initializes schema and seeds participants in the target production database."""
-    print(f"\n[SETUP] Initializing schema and benchmark competition with {num_participants:,} participants and {question_count} questions...")
-    comp_id = uuid.uuid4()
+async def setup_benchmark_environment(
+    num_participants: int,
+    question_count: int = 100,
+    comp_id: Optional[uuid.UUID] = None,
+    participant_offset: int = 0,
+) -> Tuple[uuid.UUID, List[Dict[str, Any]]]:
+    """Initializes schema and seeds participants in the target production database with optional partitioning."""
+    print(f"\n[SETUP] Initializing schema and benchmark participants (count={num_participants:,}, offset={participant_offset:,}, questions={question_count})...")
+    if comp_id is None:
+        comp_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
 
     # Ensure schema is initialized
@@ -234,75 +240,81 @@ async def setup_benchmark_environment(num_participants: int, question_count: int
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_status_deadline ON exam_attempts (status, deadline_at);"))
 
     async with AsyncSessionLocal() as db:
-        comp = Competition(
-            id=comp_id,
-            title=f"Network Capacity Exam {str(comp_id)[:8]}",
-            status=CompetitionStatus.LIVE,
-            opens_at=now - timedelta(minutes=5),
-            closes_at=now + timedelta(hours=4),
-            actual_exam_started_at=now - timedelta(minutes=5),
-            actual_exam_ends_at=now + timedelta(hours=4),
-            duration_minutes=240,
-            question_count=question_count,
-        )
-        db.add(comp)
-
-        # Seed questions
-        questions = []
-        for i in range(1, question_count + 1):
-            q = CompetitionQuestion(
-                competition_id=comp_id,
-                question_text=f"Question #{i}: Production Network Item for Capacity Engineering",
-                options={
-                    "A": f"Canonical Option Alpha {i}",
-                    "B": f"Canonical Option Beta {i}",
-                    "C": f"Canonical Option Gamma {i}",
-                    "D": f"Canonical Option Delta {i}",
-                },
-                correct_option=["A", "B", "C", "D"][(i - 1) % 4],
-                order_index=i,
+        comp = await db.get(Competition, comp_id)
+        if not comp:
+            comp = Competition(
+                id=comp_id,
+                title=f"Network Capacity Exam {str(comp_id)[:8]}",
+                status=CompetitionStatus.LIVE,
+                opens_at=now - timedelta(minutes=5),
+                closes_at=now + timedelta(hours=4),
+                actual_exam_started_at=now - timedelta(minutes=5),
+                actual_exam_ends_at=now + timedelta(hours=4),
+                duration_minutes=240,
+                question_count=question_count,
             )
-            questions.append(q)
-        db.add_all(questions)
-        await db.commit()
+            db.add(comp)
 
-        # Check existing participants by max telegram_user_id
-        max_tg_res = await db.execute(
-            select(func.max(Participant.telegram_user_id)).where(Participant.telegram_user_id >= 900000001)
+            # Seed questions
+            questions = []
+            for i in range(1, question_count + 1):
+                q = CompetitionQuestion(
+                    competition_id=comp_id,
+                    question_text=f"Question #{i}: Production Network Item for Capacity Engineering",
+                    options={
+                        "A": f"Canonical Option Alpha {i}",
+                        "B": f"Canonical Option Beta {i}",
+                        "C": f"Canonical Option Gamma {i}",
+                        "D": f"Canonical Option Delta {i}",
+                    },
+                    correct_option=["A", "B", "C", "D"][(i - 1) % 4],
+                    order_index=i,
+                )
+                questions.append(q)
+            db.add_all(questions)
+            await db.commit()
+
+        # Partitioned participant range
+        start_tg_id = 900000000 + participant_offset
+        end_tg_id = start_tg_id + num_participants
+
+        # Find existing participants within this specific partitioned range
+        res = await db.execute(
+            select(Participant.telegram_user_id).where(
+                Participant.telegram_user_id.between(start_tg_id + 1, end_tg_id)
+            )
         )
-        max_tg = max_tg_res.scalar() or 900000000
-        existing_count = max(0, max_tg - 900000000)
+        existing_ids = set(res.scalars().all())
+        missing_ids = [i for i in range(start_tg_id + 1, end_tg_id + 1) if i not in existing_ids]
 
-        if num_participants > existing_count:
-            print(f"[SETUP] Seeding {num_participants - existing_count:,} additional participants in fast bulk batches...")
+        if missing_ids:
+            print(f"[SETUP] Seeding {len(missing_ids):,} missing participants in range {start_tg_id + 1}..{end_tg_id}...")
             batch_size = 2000
-            for start_idx in range(existing_count + 1, num_participants + 1, batch_size):
-                end_idx = min(num_participants + 1, start_idx + batch_size)
-                batch_rows = []
-                for i in range(start_idx, end_idx):
-                    batch_rows.append({
-                        "id": uuid.uuid4(),
-                        "telegram_user_id": 900000000 + i,
-                        "telegram_username": f"examinee_{i}",
-                        "full_name": f"Load Candidate {i}",
-                        "phone_number": f"+251910{i:06d}",
-                        "membership_id": f"LOADTEST/{i:06d}/2026",
-                        "language_code": "en",
-                        "registered_at": now,
-                        "is_active": True,
-                    })
+            for b_start in range(0, len(missing_ids), batch_size):
+                chunk = missing_ids[b_start:b_start + batch_size]
+                batch_rows = [{
+                    "id": uuid.uuid4(),
+                    "telegram_user_id": tg_id,
+                    "telegram_username": f"examinee_{tg_id - 900000000}",
+                    "full_name": f"Load Candidate {tg_id - 900000000}",
+                    "phone_number": f"+251910{(tg_id % 1000000):06d}",
+                    "membership_id": f"LOADTEST/{(tg_id % 1000000):06d}/2026",
+                    "language_code": "en",
+                    "registered_at": now,
+                    "is_active": True,
+                } for tg_id in chunk]
                 await db.execute(insert(Participant).values(batch_rows))
                 await db.commit()
 
-        print(f"[SETUP] Generating WebAuth tokens for {num_participants:,} virtual examinees...")
+        print(f"[SETUP] Generating WebAuth tokens for {num_participants:,} virtual examinees (offset {participant_offset:,})...")
         participants_data = []
-        for i in range(1, num_participants + 1):
-            tg_id = 900000000 + i
-            username = f"examinee_{i}"
-            full_name = f"Load Candidate {i}"
-            token = create_web_auth_token(tg_id, username, full_name)
+        for i in range(start_tg_id + 1, end_tg_id + 1):
+            idx = i - 900000000
+            username = f"examinee_{idx}"
+            full_name = f"Load Candidate {idx}"
+            token = create_web_auth_token(i, username, full_name)
             participants_data.append({
-                "telegram_user_id": tg_id,
+                "telegram_user_id": i,
                 "token": token,
             })
 

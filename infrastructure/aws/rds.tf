@@ -49,11 +49,11 @@ resource "aws_db_instance" "staging_db" {
   engine               = "postgres"
   engine_version       = "16.3"
   instance_class       = var.db_instance_class # db.m6g.xlarge (4 vCPU, 16 GB RAM)
-  allocated_storage    = var.db_allocated_storage # 100 GB
+  allocated_storage    = var.db_allocated_storage # 400 GB (activates 4-volume EBS striping on AWS RDS)
   max_allocated_storage = 500 # Auto-scale up to 500 GB if needed
   storage_type         = "gp3"
-  iops                 = var.db_iops # 12,000 Provisioned IOPS
-  storage_throughput   = 500 # 500 MB/s
+  iops                 = var.db_iops # 12,000 IOPS (included baseline at >= 400 GiB)
+  storage_throughput   = 500 # 500 MB/s (included baseline at >= 400 GiB)
 
   db_name  = var.db_name
   username = var.db_username
