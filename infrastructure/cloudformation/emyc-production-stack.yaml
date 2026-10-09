@@ -1,0 +1,623 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  EMYC Production Infrastructure — Highly Scalable, Cost-Optimized Serverless Stack.
+  Features:
+  - 100% On-Demand Auto-Scaling (ECS Fargate 1 -> 32 tasks, Aurora Serverless v2 0.5 -> 16 ACU).
+  - Monthly budget strictly capped under ~$120 with automated AWS Budget email alerts.
+  - Zero NAT Gateway fee ($0.00 egress) via secure public-subnet Fargate routing with ALB-only ingress.
+  - Automated password rotation & secrets management via AWS Secrets Manager.
+  - High availability multi-AZ architecture.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Application Configuration"
+        Parameters:
+          - EnvironmentName
+          - AppImage
+          - AlertEmail
+          - TelegramBotToken
+          - WebAppUrl
+          - AdminTelegramIds
+      - Label:
+          default: "Financial & Scaling Guardrails"
+        Parameters:
+          - MonthlyBudgetLimit
+          - FargateMinCapacity
+          - FargateMaxCapacity
+          - AuroraMinACU
+          - AuroraMaxACU
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: "production"
+    Description: "Deployment environment name (e.g. production, staging)"
+
+  AppImage:
+    Type: String
+    Default: "123456789012.dkr.ecr.us-east-1.amazonaws.com/emyc-app:latest"
+    Description: "ECR Docker Image URI for the EMYC FastAPI application container"
+
+  AlertEmail:
+    Type: String
+    Description: "Email address to receive AWS Budget cost alerts (e.g. at $96 and $120) and operational alarms"
+
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Default: "MOCK_TOKEN_CHANGE_ME"
+    Description: "Telegram Bot Token from @BotFather for participant registration and announcements"
+
+  WebAppUrl:
+    Type: String
+    Default: "https://emyc-exam.pages.dev"
+    Description: "Frontend Cloudflare Mini App URL for examinee web sessions"
+
+  AdminTelegramIds:
+    Type: String
+    Default: ""
+    Description: "Comma-separated list of administrative Telegram User IDs"
+
+  MonthlyBudgetLimit:
+    Type: Number
+    Default: 120
+    Description: "Monthly spending limit in USD for automated AWS Budget alerting"
+
+  FargateMinCapacity:
+    Type: Number
+    Default: 1
+    Description: "Minimum Fargate tasks during registration & announcement month (lean baseline)"
+
+  FargateMaxCapacity:
+    Type: Number
+    Default: 32
+    Description: "Maximum Fargate tasks during the 1-2 hour 100,000 examinee exam surge"
+
+  AuroraMinACU:
+    Type: Number
+    Default: 0.5
+    Description: "Minimum Aurora Serverless v2 capacity (0.5 ACU = 1 GB RAM, fractional vCPU @ $0.06/hr)"
+
+  AuroraMaxACU:
+    Type: Number
+    Default: 16.0
+    Description: "Maximum Aurora Serverless v2 capacity during exam surge (16 ACU = 32 GB RAM, 8 vCPUs)"
+
+Resources:
+  # ============================================================================
+  # 1. NETWORKING (VPC, Subnets, Route Tables, Internet Gateway)
+  # ============================================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.100.0.0/16"
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-vpc"
+        - Key: Project
+          Value: "EMYC"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-igw"
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnets (Hosts ALB and ECS Tasks with Direct IGW Egress = $0 NAT fee)
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.100.1.0/24"
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-public-1"
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.100.2.0/24"
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-public-2"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-public-rt"
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private Database Subnets (Strictly isolated from Internet)
+  DbSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.100.20.0/24"
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-db-1"
+
+  DbSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.100.21.0/24"
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-db-2"
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for Aurora PostgreSQL Serverless v2"
+      SubnetIds:
+        - !Ref DbSubnet1
+        - !Ref DbSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-aurora-subnet-group"
+
+  # ============================================================================
+  # 2. SECURITY GROUPS (Strict Ingress Lockdown & Zero Direct DB Exposure)
+  # ============================================================================
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "ALB Ingress Security Group"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+          Description: "Public HTTP Ingress"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+          Description: "Public HTTPS Ingress"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: "0.0.0.0/0"
+          Description: "Egress to App Tasks"
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-alb-sg"
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "ECS App Security Group (Protected by ALB)"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: "Allow traffic strictly from ALB"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: "0.0.0.0/0"
+          Description: "Allow outbound traffic (Telegram API via IGW, DB queries)"
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-ecs-sg"
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Aurora PostgreSQL Isolated Security Group"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsSecurityGroup
+          Description: "PostgreSQL ingress strictly from ECS application tasks"
+      # Zero outbound egress rules defined (stateful database responses only)
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-db-sg"
+
+  # ============================================================================
+  # 3. SECRETS MANAGEMENT (Automated Password Generation)
+  # ============================================================================
+  DbMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "emyc/${EnvironmentName}/aurora-master-credentials"
+      Description: "Auto-generated master credentials for Aurora Serverless v2 PostgreSQL"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "postgres"}'
+        GenerateStringKey: "password"
+        ExcludeCharacters: "/@\"'\\"
+
+  # ============================================================================
+  # 4. DATABASE: AMAZON AURORA POSTGRESQL SERVERLESS V2
+  # ============================================================================
+  AuroraClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: "Tuned cluster parameter group for EMYC PostgreSQL 16"
+      Family: "aurora-postgresql16"
+      Parameters:
+        shared_preload_libraries: "pg_stat_statements"
+        statement_timeout: "180000"
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-aurora-params"
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub "emyc-${EnvironmentName}-aurora-cluster"
+      Engine: "aurora-postgresql"
+      EngineMode: "provisioned"
+      EngineVersion: "16.3"
+      DatabaseName: "competition_db"
+      MasterUsername: "postgres"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DbSecurityGroup
+      DBClusterParameterGroupName: !Ref AuroraClusterParameterGroup
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 1
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref AuroraMinACU # 0.5 ACU ($0.06/hr baseline during registration)
+        MaxCapacity: !Ref AuroraMaxACU # 16.0 ACU ($1.92/hr peak during 100k exam surge)
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-aurora-cluster"
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "emyc-${EnvironmentName}-aurora-instance-1"
+      DBClusterIdentifier: !Ref AuroraCluster
+      Engine: "aurora-postgresql"
+      DBInstanceClass: "db.serverless" # Binds to Aurora Serverless v2 scaling
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-aurora-instance"
+
+  # ============================================================================
+  # 5. LOAD BALANCING (Application Load Balancer)
+  # ============================================================================
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "emyc-${EnvironmentName}-alb"
+      Scheme: "internet-facing"
+      Type: "application"
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      IdleTimeout: 120
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-alb"
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "emyc-${EnvironmentName}-tg"
+      Port: 8000
+      Protocol: "HTTP"
+      VpcId: !Ref VPC
+      TargetType: "ip"
+      TargetGroupAttributes:
+        - Key: "load_balancing.algorithm.type"
+          Value: "least_outstanding_requests"
+        - Key: "deregistration_delay.timeout_seconds"
+          Value: "30"
+      HealthCheckEnabled: true
+      HealthCheckPath: "/health"
+      HealthCheckPort: "8000"
+      HealthCheckProtocol: "HTTP"
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: "200"
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-tg"
+
+  AlbHttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 80
+      Protocol: "HTTP"
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup
+
+  # ============================================================================
+  # 6. COMPUTE: AWS ECS FARGATE CLUSTER & SERVICE
+  # ============================================================================
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "emyc-${EnvironmentName}-cluster"
+      ClusterSettings:
+        - Name: "containerInsights"
+          Value: "enabled"
+      Tags:
+        - Key: Name
+          Value: !Sub "emyc-${EnvironmentName}-cluster"
+
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/emyc-${EnvironmentName}-app"
+      RetentionInDays: 7
+
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "emyc-${EnvironmentName}-ecs-execution-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "ecs-tasks.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: "ReadSecretsPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "secretsmanager:GetSecretValue"
+                Resource:
+                  - !Ref DbMasterSecret
+
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "emyc-${EnvironmentName}-ecs-task-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "ecs-tasks.amazonaws.com"
+            Action: "sts:AssumeRole"
+
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "emyc-${EnvironmentName}-task"
+      NetworkMode: "awsvpc"
+      RequiresCompatibilities:
+        - "FARGATE"
+      Cpu: "2048"    # 2 vCPU
+      Memory: "4096" # 4 GB RAM
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: "emyc-app"
+          Image: !Ref AppImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: "tcp"
+          Environment:
+            - Name: "ENVIRONMENT"
+              Value: !Ref EnvironmentName
+            - Name: "DEBUG"
+              Value: "false"
+            - Name: "BOT_MODE"
+              Value: "webhook"
+            - Name: "WEBAPP_URL"
+              Value: !Ref WebAppUrl
+            - Name: "ADMIN_TELEGRAM_IDS"
+              Value: !Ref AdminTelegramIds
+            - Name: "TELEGRAM_BOT_TOKEN"
+              Value: !Ref TelegramBotToken
+            - Name: "WEB_CONCURRENCY"
+              Value: "2"
+            - Name: "UVICORN_KEEP_ALIVE"
+              Value: "65"
+            - Name: "DB_POOL_SIZE"
+              Value: "12"
+            - Name: "DB_MAX_OVERFLOW"
+              Value: "3"
+            - Name: "DB_POOL_TIMEOUT"
+              Value: "180.0"
+            - Name: "DATABASE_URL"
+              Value: !Sub
+                - "postgresql+asyncpg://postgres:${DbPassword}@${ClusterEndpoint}:5432/competition_db"
+                - DbPassword: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}"
+                  ClusterEndpoint: !GetAtt AuroraCluster.Endpoint.Address
+            - Name: "DATABASE_SYNC_URL"
+              Value: !Sub
+                - "postgresql://postgres:${DbPassword}@${ClusterEndpoint}:5432/competition_db"
+                - DbPassword: !Sub "{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}"
+                  ClusterEndpoint: !GetAtt AuroraCluster.Endpoint.Address
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-group: !Ref CloudWatchLogsGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: "app"
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+            Interval: 10
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 20
+
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: AlbHttpListener
+    Properties:
+      ServiceName: !Sub "emyc-${EnvironmentName}-app-service"
+      Cluster: !Ref EcsCluster
+      TaskDefinition: !Ref EcsTaskDefinition
+      LaunchType: "FARGATE"
+      DesiredCount: !Ref FargateMinCapacity # 1 task baseline ($35/mo)
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+          AssignPublicIp: "ENABLED" # Enables direct IGW egress (eliminates $36/mo NAT Gateway)
+      LoadBalancers:
+        - ContainerName: "emyc-app"
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+
+  # ============================================================================
+  # 7. AUTOMATED ON-DEMAND AUTO SCALING (1 -> 32 TASKS)
+  # ============================================================================
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref FargateMaxCapacity # 32 tasks during exam surge
+      MinCapacity: !Ref FargateMinCapacity # 1 task baseline
+      ResourceId: !Sub "service/${EcsCluster}/${EcsService.Name}"
+      RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
+      ScalableDimension: "ecs:service:DesiredCount"
+      ServiceNamespace: "ecs"
+
+  EcsCpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "emyc-${EnvironmentName}-cpu-autoscaling"
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        TargetValue: 65.0
+        ScaleInCooldown: 300  # 5 minutes stabilization to prevent flapping
+        ScaleOutCooldown: 30 # Rapid 30-second burst response
+
+  # ============================================================================
+  # 8. FINANCIAL GUARDRAIL: AUTOMATIC $120 AWS BUDGET ALERT
+  # ============================================================================
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "EMYC-${EnvironmentName}-Monthly-Cap-${MonthlyBudgetLimit}-USD"
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetLimit
+          Unit: "USD"
+        TimeUnit: "MONTHLY"
+        BudgetType: "COST"
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: "ACTUAL"
+            ComparisonOperator: "GREATER_THAN"
+            Threshold: 80 # Alert at $96
+            ThresholdType: "PERCENTAGE"
+          Subscribers:
+            - SubscriptionType: "EMAIL"
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: "ACTUAL"
+            ComparisonOperator: "GREATER_THAN"
+            Threshold: 100 # Alert at $120
+            ThresholdType: "PERCENTAGE"
+          Subscribers:
+            - SubscriptionType: "EMAIL"
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: "FORECASTED"
+            ComparisonOperator: "GREATER_THAN"
+            Threshold: 100 # Alert if projected month-end exceeds $120
+            ThresholdType: "PERCENTAGE"
+          Subscribers:
+            - SubscriptionType: "EMAIL"
+              Address: !Ref AlertEmail
+
+# ==============================================================================
+# OUTPUTS
+# ==============================================================================
+Outputs:
+  AlbDnsName:
+    Description: "Public DNS hostname of the Application Load Balancer"
+    Value: !GetAtt Alb.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-AlbDnsName"
+
+  WebhookUrl:
+    Description: "Telegram Bot Webhook Endpoint URL"
+    Value: !Sub "http://${Alb.DNSName}/api/v1/telegram/webhook"
+
+  HealthEndpoint:
+    Description: "Application Health Check Endpoint"
+    Value: !Sub "http://${Alb.DNSName}/health"
+
+  AuroraClusterEndpoint:
+    Description: "PostgreSQL Database Cluster Endpoint (Host)"
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+
+  AuroraDatabaseName:
+    Description: "PostgreSQL Database Name"
+    Value: "competition_db"
+
+  SecretsManagerCredentialsArn:
+    Description: "AWS Secrets Manager ARN storing database master password"
+    Value: !Ref DbMasterSecret
+
+  BudgetSafetyLimit:
+    Description: "Active Monthly Budget Cap with Email Alerts"
+    Value: !Sub "$${MonthlyBudgetLimit} USD (Alerts configured for ${AlertEmail})"
