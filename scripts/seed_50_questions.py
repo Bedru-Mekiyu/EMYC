@@ -6,8 +6,26 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 
-# Database connection to the local Docker Postgres instance on port 5434
-DATABASE_URL = "postgresql+asyncpg://postgres:postgrespassword@localhost:5434/competition_db"
+import os
+import sys
+
+def get_target_db_url() -> str:
+    """Resolves target database URL from CLI argument, environment, or local default."""
+    if len(sys.argv) > 1 and sys.argv[1].strip():
+        url = sys.argv[1].strip()
+    elif os.getenv("DATABASE_URL"):
+        url = os.getenv("DATABASE_URL").strip()
+    else:
+        url = "postgresql+asyncpg://postgres:postgrespassword@localhost:5434/competition_db"
+
+    # Automatically normalize standard Supabase / PostgreSQL URLs
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
+DATABASE_URL = get_target_db_url()
 
 QUESTIONS_DATA = [
     # --------------------------------------------------------------------------

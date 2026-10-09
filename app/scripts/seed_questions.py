@@ -8,132 +8,21 @@ from app.core.database import AsyncSessionLocal
 from app.models.competition import Competition, CompetitionStatus
 from app.models.question import CompetitionQuestion
 
+# Canonical 20 sample questions (for quick tests and backwards compatibility)
+SAMPLE_QUESTIONS = [{'order_index': 1, 'question_text': 'In early Islamic history, what was the first destination of migration (Hijrah) for early Muslims fleeing persecution in Makkah?', 'options': {'A': 'Abyssinia (Ethiopia)', 'B': 'Yathrib (Madinah)', 'C': 'Yemen', 'D': "Ta'if"}, 'correct_option': 'A'}, {'order_index': 2, 'question_text': 'Who was the just and righteous King of Abyssinia (Al-Najashi) who granted asylum and protection to early Muslim emigrants?', 'options': {'A': 'Armah (As-hama)', 'B': 'Ezana', 'C': 'Kaleb', 'D': 'Menelik I'}, 'correct_option': 'A'}, {'order_index': 3, 'question_text': "Which Surah from the Holy Quran did Ja'far ibn Abi Talib recite before King Al-Najashi to explain Islamic beliefs about Prophet Isa (Jesus) and Maryam (Mary)?", 'options': {'A': 'Surah Maryam', 'B': 'Surah Al-Kahf', 'C': "Surah Ali 'Imran", 'D': 'Surah Al-Baqarah'}, 'correct_option': 'A'}, {'order_index': 4, 'question_text': "Who was the renowned companion of Prophet Muhammad (ﷺ), born of Ethiopian heritage, who became the first Mu'adhin (caller to prayer) of Islam?", 'options': {'A': 'Bilal ibn Rabah', 'B': 'Salman Al-Farsi', 'C': 'Ammar ibn Yasir', 'D': 'Abu Dharr Al-Ghifari'}, 'correct_option': 'A'}, {'order_index': 5, 'question_text': 'Which historic mosque located in northern Ethiopia (Tigray region) is celebrated as one of the oldest Muslim settlements and heritage sites in Africa?', 'options': {'A': 'Al-Nejashi Mosque in Negash', 'B': 'Grand Anwar Mosque', 'C': 'Grand Jamia Mosque', 'D': 'Nur Mosque'}, 'correct_option': 'A'}, {'order_index': 6, 'question_text': 'Which historic walled city in eastern Ethiopia is recognized worldwide as a sacred center of Islamic heritage and a UNESCO World Heritage site?', 'options': {'A': 'Harar Jugol', 'B': 'Gondar', 'C': 'Axum', 'D': 'Lalibela'}, 'correct_option': 'A'}, {'order_index': 7, 'question_text': "Which grand mosque in the Mercato district of Addis Ababa is the largest and most prominent central Islamic institution in Ethiopia's capital?", 'options': {'A': 'Grand Anwar Mosque', 'B': 'Beni Mosque', 'C': 'Al-Nejashi Mosque', 'D': 'Bilal Mosque'}, 'correct_option': 'A'}, {'order_index': 8, 'question_text': 'What is the primary mission and founding objective of the Ethiopian Muslim Youth Council (EMYC)?', 'options': {'A': 'Empowering youth through intellectual development, Islamic ethics, education, and community service', 'B': 'Commercial enterprise and real estate investments', 'C': 'Political lobbying and partisan electoral campaigns', 'D': 'Professional sports league management'}, 'correct_option': 'A'}, {'order_index': 9, 'question_text': 'Which prominent historical and cultural site in the Bale region of southeastern Ethiopia is renowned for its centuries-old Islamic scholarly heritage?', 'options': {'A': 'Dirre Sheikh Hussein', 'B': 'Tiwi Heritage Complex', 'C': 'Fasil Ghebbi', 'D': 'Sof Omar Caves exclusively'}, 'correct_option': 'A'}, {'order_index': 10, 'question_text': "Which revered female companion of Ethiopian origin was affectionately described by Prophet Muhammad (ﷺ) as 'my mother after my mother'?", 'options': {'A': 'Umm Ayman (Barakah)', 'B': 'Asma bint Abi Bakr', 'C': 'Umm Salamah', 'D': 'Rufaydah Al-Aslamiyyah'}, 'correct_option': 'A'}, {'order_index': 11, 'question_text': 'How many total chapters (Surahs) are contained within the Holy Quran?', 'options': {'A': '110', 'B': '114', 'C': '120', 'D': '124'}, 'correct_option': 'B'}, {'order_index': 12, 'question_text': 'What is the longest Surah in the Holy Quran, containing 286 verses?', 'options': {'A': "Surah Ali 'Imran", 'B': 'Surah Al-Baqarah', 'C': 'Surah An-Nisa', 'D': "Surah Al-Ma'idah"}, 'correct_option': 'B'}, {'order_index': 13, 'question_text': 'What is the shortest Surah in the Holy Quran by verse count?', 'options': {'A': 'Surah Al-Ikhlas', 'B': 'Surah An-Nasr', 'C': 'Surah Al-Kawthar', 'D': 'Surah Al-Asr'}, 'correct_option': 'C'}, {'order_index': 14, 'question_text': 'Which verse in the Holy Quran is widely designated as Ayat al-Kursi (The Verse of the Throne)?', 'options': {'A': 'Surah Al-Baqarah (2:255)', 'B': 'Surah Al-Baqarah (2:286)', 'C': "Surah Ali 'Imran (3:18)", 'D': 'Surah An-Nur (24:35)'}, 'correct_option': 'A'}, {'order_index': 15, 'question_text': "What was the very first command revealed to Prophet Muhammad (ﷺ) in the opening verses of Surah Al-'Alaq?", 'options': {'A': 'Qum (Arise)', 'B': 'Iqra (Read / Recite)', 'C': 'Sabbih (Glorify)', 'D': 'Unshur (Proclaim)'}, 'correct_option': 'B'}, {'order_index': 16, 'question_text': 'In which mountain cave was Prophet Muhammad (ﷺ) engaged in solitary reflection when the first revelation descended?', 'options': {'A': 'Cave Thawr', 'B': 'Cave Hira', 'C': 'Cave of Uhud', 'D': 'Cave Qubaa'}, 'correct_option': 'B'}, {'order_index': 17, 'question_text': 'What is the only Islamic calendar month explicitly mentioned by name in the text of the Holy Quran?', 'options': {'A': 'Muharram', 'B': 'Rajab', 'C': 'Ramadan', 'D': 'Dhul-Hijjah'}, 'correct_option': 'C'}, {'order_index': 18, 'question_text': 'Which respected companion was commissioned to lead the primary compilation and standardization of the Quranic mushaf?', 'options': {'A': 'Zayd ibn Thabit', 'B': "Abdullah ibn Mas'ud", 'C': "Ubayy ibn Ka'b", 'D': "Mu'adh ibn Jabal"}, 'correct_option': 'A'}, {'order_index': 19, 'question_text': "Which Surah is known as 'Umm al-Kitab' (The Mother of the Book) and is recited in every unit (Rak'ah) of daily prayer?", 'options': {'A': 'Surah Al-Fatihah', 'B': 'Surah Al-Ikhlas', 'C': 'Surah Ya-Sin', 'D': 'Surah Al-Mulk'}, 'correct_option': 'A'}, {'order_index': 20, 'question_text': "Which Surah does not begin with the Basmalah ('Bismillahir-Rahmanir-Rahim') at its opening?", 'options': {'A': 'Surah At-Tawbah', 'B': 'Surah Al-Anfal', 'C': 'Surah Yunus', 'D': 'Surah Hud'}, 'correct_option': 'A'}]
 
-SAMPLE_QUESTIONS = [
-    {
-        "question_text": "In Islamic history, what was the first Hijrah destination for early Muslims fleeing persecution in Makkah?",
-        "options": {"A": "Abyssinia (Ethiopia)", "B": "Yemen", "C": "Ta'if", "D": "Madinah"},
-        "correct_option": "A",
-    },
-    {
-        "question_text": "Who was the just and righteous King of Abyssinia (Al-Najashi) who sheltered the Prophet Muhammad's (pbuh) companions?",
-        "options": {"A": "Armah", "B": "Ezana", "C": "Kaleb", "D": "Menelik"},
-        "correct_option": "A",
-    },
-    {
-        "question_text": "Which Surah of the Holy Quran was recited by Ja'far ibn Abi Talib before the King of Abyssinia?",
-        "options": {"A": "Surah Maryam", "B": "Surah Al-Kahf", "C": "Surah Ya-Sin", "D": "Surah Al-Baqarah"},
-        "correct_option": "A",
-    },
-    {
-        "question_text": "Who was the companion of the Prophet Muhammad (pbuh) known as the first Mu'adhin in Islam, of Ethiopian heritage?",
-        "options": {"A": "Bilal ibn Rabah", "B": "Salman Al-Farsi", "C": "Ammar ibn Yasir", "D": "Abu Dharr Al-Ghifari"},
-        "correct_option": "A",
-    },
-    {
-        "question_text": "What is the primary objective of the Ethiopian Muslim Youth Council (EMYC)?",
-        "options": {
-            "A": "Empowering Muslim youth through education, ethics, and unity",
-            "B": "Commercial trading",
-            "C": "Political campaigning",
-            "D": "Athletic sponsorships",
-        },
-        "correct_option": "A",
-    },
-    {
-        "question_text": "How many daily obligatory prayers (Fard Salah) are prescribed for Muslims?",
-        "options": {"A": "3", "B": "5", "C": "7", "D": "4"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "In which Islamic month is fasting (Sawm) obligatory for all eligible Muslims?",
-        "options": {"A": "Rajab", "B": "Sha'ban", "C": "Ramadan", "D": "Dhul-Hijjah"},
-        "correct_option": "C",
-    },
-    {
-        "question_text": "What is the longest Surah (chapter) in the Holy Quran?",
-        "options": {"A": "Surah Ali 'Imran", "B": "Surah Al-Baqarah", "C": "Surah An-Nisa", "D": "Surah Al-A'raf"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "What is the shortest Surah (chapter) in the Holy Quran?",
-        "options": {"A": "Surah Al-Ikhlas", "B": "Surah An-Nasr", "C": "Surah Al-Kawthar", "D": "Surah Al-Asr"},
-        "correct_option": "C",
-    },
-    {
-        "question_text": "In which blessed city was Prophet Muhammad (peace be upon him) born?",
-        "options": {"A": "Madinah", "B": "Makkah", "C": "Jerusalem", "D": "Ta'if"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "In which cave did Prophet Muhammad (pbuh) receive the first revelation from Angel Jibreel?",
-        "options": {"A": "Cave Thawr", "B": "Cave Hira", "C": "Cave of Uhud", "D": "Cave Kahf"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "The Prophet Muhammad (pbuh) said: 'The most beloved of deeds to Allah is that which is...'",
-        "options": {"A": "Most expensive", "B": "Most regular and consistent, even if small", "C": "Done only once a year", "D": "Done in public only"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "What is the first month of the Islamic Hijri calendar?",
-        "options": {"A": "Muharram", "B": "Safar", "C": "Ramadan", "D": "Shawwal"},
-        "correct_option": "A",
-    },
-    {
-        "question_text": "Which historic mosque located in northern Ethiopia is renowned as one of the oldest Islamic heritage sites in Africa?",
-        "options": {"A": "Al-Nejashi Mosque", "B": "Anwar Mosque", "C": "Nur Mosque", "D": "Grand Jamia Mosque"},
-        "correct_option": "A",
-    },
-    {
-        "question_text": "What is the Islamic term for the obligatory annual charity given by eligible Muslims to support the poor?",
-        "options": {"A": "Sadaqah", "B": "Zakat", "C": "Waqf", "D": "Fidyah"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "How many chapters (Surahs) are in the Holy Quran?",
-        "options": {"A": "110", "B": "114", "C": "120", "D": "100"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "What was the decisive historical battle that took place on the 17th of Ramadan in the 2nd year of Hijrah?",
-        "options": {"A": "Battle of Uhud", "B": "Battle of Badr", "C": "Battle of Khandaq", "D": "Battle of Hunayn"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "In Islamic terminology, the highest level of faith, 'Ihsan', is defined as:",
-        "options": {
-            "A": "Worshipping Allah as if you see Him, for if you see Him not, He sees you",
-            "B": "Performing pilgrimage every year",
-            "C": "Memorizing the dictionary",
-            "D": "Fasting every alternate day",
-        },
-        "correct_option": "A",
-    },
-    {
-        "question_text": "Which chemical element makes up approximately 78% of the Earth's atmosphere?",
-        "options": {"A": "Oxygen", "B": "Nitrogen", "C": "Carbon Dioxide", "D": "Hydrogen"},
-        "correct_option": "B",
-    },
-    {
-        "question_text": "Which core principle best represents EMYC's commitment to community development and youth ethics?",
-        "options": {
-            "A": "Sincere service (Khidmah), integrity (Amanah), and moral excellence (Akhlaq)",
-            "B": "Individual isolation",
-            "C": "Material accumulation",
-            "D": "Passive bystander culture",
-        },
-        "correct_option": "A",
-    },
-]
+# Official 50 comprehensive questions for EMYC Youth Championship
+OFFICIAL_50_QUESTIONS = [{'order_index': 1, 'question_text': 'In early Islamic history, what was the first destination of migration (Hijrah) for early Muslims fleeing persecution in Makkah?', 'options': {'A': 'Abyssinia (Ethiopia)', 'B': 'Yathrib (Madinah)', 'C': 'Yemen', 'D': "Ta'if"}, 'correct_option': 'A'}, {'order_index': 2, 'question_text': 'Who was the just and righteous King of Abyssinia (Al-Najashi) who granted asylum and protection to early Muslim emigrants?', 'options': {'A': 'Armah (As-hama)', 'B': 'Ezana', 'C': 'Kaleb', 'D': 'Menelik I'}, 'correct_option': 'A'}, {'order_index': 3, 'question_text': "Which Surah from the Holy Quran did Ja'far ibn Abi Talib recite before King Al-Najashi to explain Islamic beliefs about Prophet Isa (Jesus) and Maryam (Mary)?", 'options': {'A': 'Surah Maryam', 'B': 'Surah Al-Kahf', 'C': "Surah Ali 'Imran", 'D': 'Surah Al-Baqarah'}, 'correct_option': 'A'}, {'order_index': 4, 'question_text': "Who was the renowned companion of Prophet Muhammad (ﷺ), born of Ethiopian heritage, who became the first Mu'adhin (caller to prayer) of Islam?", 'options': {'A': 'Bilal ibn Rabah', 'B': 'Salman Al-Farsi', 'C': 'Ammar ibn Yasir', 'D': 'Abu Dharr Al-Ghifari'}, 'correct_option': 'A'}, {'order_index': 5, 'question_text': 'Which historic mosque located in northern Ethiopia (Tigray region) is celebrated as one of the oldest Muslim settlements and heritage sites in Africa?', 'options': {'A': 'Al-Nejashi Mosque in Negash', 'B': 'Grand Anwar Mosque', 'C': 'Grand Jamia Mosque', 'D': 'Nur Mosque'}, 'correct_option': 'A'}, {'order_index': 6, 'question_text': 'Which historic walled city in eastern Ethiopia is recognized worldwide as a sacred center of Islamic heritage and a UNESCO World Heritage site?', 'options': {'A': 'Harar Jugol', 'B': 'Gondar', 'C': 'Axum', 'D': 'Lalibela'}, 'correct_option': 'A'}, {'order_index': 7, 'question_text': "Which grand mosque in the Mercato district of Addis Ababa is the largest and most prominent central Islamic institution in Ethiopia's capital?", 'options': {'A': 'Grand Anwar Mosque', 'B': 'Beni Mosque', 'C': 'Al-Nejashi Mosque', 'D': 'Bilal Mosque'}, 'correct_option': 'A'}, {'order_index': 8, 'question_text': 'What is the primary mission and founding objective of the Ethiopian Muslim Youth Council (EMYC)?', 'options': {'A': 'Empowering youth through intellectual development, Islamic ethics, education, and community service', 'B': 'Commercial enterprise and real estate investments', 'C': 'Political lobbying and partisan electoral campaigns', 'D': 'Professional sports league management'}, 'correct_option': 'A'}, {'order_index': 9, 'question_text': 'Which prominent historical and cultural site in the Bale region of southeastern Ethiopia is renowned for its centuries-old Islamic scholarly heritage?', 'options': {'A': 'Dirre Sheikh Hussein', 'B': 'Tiwi Heritage Complex', 'C': 'Fasil Ghebbi', 'D': 'Sof Omar Caves exclusively'}, 'correct_option': 'A'}, {'order_index': 10, 'question_text': "Which revered female companion of Ethiopian origin was affectionately described by Prophet Muhammad (ﷺ) as 'my mother after my mother'?", 'options': {'A': 'Umm Ayman (Barakah)', 'B': 'Asma bint Abi Bakr', 'C': 'Umm Salamah', 'D': 'Rufaydah Al-Aslamiyyah'}, 'correct_option': 'A'}, {'order_index': 11, 'question_text': 'How many total chapters (Surahs) are contained within the Holy Quran?', 'options': {'A': '110', 'B': '114', 'C': '120', 'D': '124'}, 'correct_option': 'B'}, {'order_index': 12, 'question_text': 'What is the longest Surah in the Holy Quran, containing 286 verses?', 'options': {'A': "Surah Ali 'Imran", 'B': 'Surah Al-Baqarah', 'C': 'Surah An-Nisa', 'D': "Surah Al-Ma'idah"}, 'correct_option': 'B'}, {'order_index': 13, 'question_text': 'What is the shortest Surah in the Holy Quran by verse count?', 'options': {'A': 'Surah Al-Ikhlas', 'B': 'Surah An-Nasr', 'C': 'Surah Al-Kawthar', 'D': 'Surah Al-Asr'}, 'correct_option': 'C'}, {'order_index': 14, 'question_text': 'Which verse in the Holy Quran is widely designated as Ayat al-Kursi (The Verse of the Throne)?', 'options': {'A': 'Surah Al-Baqarah (2:255)', 'B': 'Surah Al-Baqarah (2:286)', 'C': "Surah Ali 'Imran (3:18)", 'D': 'Surah An-Nur (24:35)'}, 'correct_option': 'A'}, {'order_index': 15, 'question_text': "What was the very first command revealed to Prophet Muhammad (ﷺ) in the opening verses of Surah Al-'Alaq?", 'options': {'A': 'Qum (Arise)', 'B': 'Iqra (Read / Recite)', 'C': 'Sabbih (Glorify)', 'D': 'Unshur (Proclaim)'}, 'correct_option': 'B'}, {'order_index': 16, 'question_text': 'In which mountain cave was Prophet Muhammad (ﷺ) engaged in solitary reflection when the first revelation descended?', 'options': {'A': 'Cave Thawr', 'B': 'Cave Hira', 'C': 'Cave of Uhud', 'D': 'Cave Qubaa'}, 'correct_option': 'B'}, {'order_index': 17, 'question_text': 'What is the only Islamic calendar month explicitly mentioned by name in the text of the Holy Quran?', 'options': {'A': 'Muharram', 'B': 'Rajab', 'C': 'Ramadan', 'D': 'Dhul-Hijjah'}, 'correct_option': 'C'}, {'order_index': 18, 'question_text': 'Which respected companion was commissioned to lead the primary compilation and standardization of the Quranic mushaf?', 'options': {'A': 'Zayd ibn Thabit', 'B': "Abdullah ibn Mas'ud", 'C': "Ubayy ibn Ka'b", 'D': "Mu'adh ibn Jabal"}, 'correct_option': 'A'}, {'order_index': 19, 'question_text': "Which Surah is known as 'Umm al-Kitab' (The Mother of the Book) and is recited in every unit (Rak'ah) of daily prayer?", 'options': {'A': 'Surah Al-Fatihah', 'B': 'Surah Al-Ikhlas', 'C': 'Surah Ya-Sin', 'D': 'Surah Al-Mulk'}, 'correct_option': 'A'}, {'order_index': 20, 'question_text': "Which Surah does not begin with the Basmalah ('Bismillahir-Rahmanir-Rahim') at its opening?", 'options': {'A': 'Surah At-Tawbah', 'B': 'Surah Al-Anfal', 'C': 'Surah Yunus', 'D': 'Surah Hud'}, 'correct_option': 'A'}, {'order_index': 21, 'question_text': 'In which historical city and approximately which Gregorian year was Prophet Muhammad (ﷺ) born?', 'options': {'A': 'Makkah, circa 570 CE', 'B': 'Madinah, circa 580 CE', 'C': "Ta'if, circa 565 CE", 'D': 'Jerusalem, circa 575 CE'}, 'correct_option': 'A'}, {'order_index': 22, 'question_text': 'What major historic battle occurred in the 2nd year of Hijrah on the 17th of Ramadan, marking the first decisive victory for Muslims?', 'options': {'A': 'Battle of Uhud', 'B': 'Battle of Badr', 'C': 'Battle of the Trench (Khandaq)', 'D': 'Battle of Hunayn'}, 'correct_option': 'B'}, {'order_index': 23, 'question_text': 'What was the name of the historic peace accord signed in 6 AH between the Muslims and the Quraysh of Makkah?', 'options': {'A': 'Treaty of Hudaybiyyah', 'B': 'Pact of Al-Fudul', 'C': 'Constitution of Madinah', 'D': 'Pledge of Ridwan'}, 'correct_option': 'A'}, {'order_index': 24, 'question_text': "Who was the first person to embrace Islam, affirming the Prophet's (ﷺ) divine mission and offering steadfast support?", 'options': {'A': 'Khadijah bint Khuwaylid', 'B': 'Aishah bint Abi Bakr', 'C': 'Fatimah az-Zahra', 'D': 'Umm Salamah'}, 'correct_option': 'A'}, {'order_index': 25, 'question_text': 'Who was appointed as the first Caliph (successor) of the Muslim community following the demise of the Prophet Muhammad (ﷺ)?', 'options': {'A': 'Abu Bakr As-Siddiq', 'B': 'Umar ibn Al-Khattab', 'C': 'Uthman ibn Affan', 'D': 'Ali ibn Abi Talib'}, 'correct_option': 'A'}, {'order_index': 26, 'question_text': 'Under whose caliphate was the official Islamic lunar calendar established, choosing the Hijrah as its epoch?', 'options': {'A': 'Abu Bakr As-Siddiq', 'B': 'Umar ibn Al-Khattab', 'C': 'Uthman ibn Affan', 'D': 'Umar ibn Abd al-Aziz'}, 'correct_option': 'B'}, {'order_index': 27, 'question_text': "Which companion, known as 'Dhun-Nurayn' (Possessor of the Two Lights), supervised the distribution of standardized Quranic copies across major cities?", 'options': {'A': 'Uthman ibn Affan', 'B': 'Ali ibn Abi Talib', 'C': 'Talhah ibn Ubaydullah', 'D': 'Az-Zubayr ibn Al-Awwam'}, 'correct_option': 'A'}, {'order_index': 28, 'question_text': 'Who was the fourth Rightly-Guided Caliph, renowned for his profound scholarship, eloquence, and valour in Islam?', 'options': {'A': 'Ali ibn Abi Talib', 'B': "Mu'awiyah ibn Abi Sufyan", 'C': "Sa'd ibn Abi Waqqas", 'D': 'Abdullah ibn az-Zubayr'}, 'correct_option': 'A'}, {'order_index': 29, 'question_text': 'What is the miraculous night journey from Al-Masjid al-Haram to Al-Masjid al-Aqsa and subsequent ascension to the heavens called?', 'options': {'A': "Al-Isra wal-Mi'raj", 'B': 'Al-Hijrah an-Nabawiyyah', 'C': 'Yawm al-Furqan', 'D': 'Ghazwat al-Ahzab'}, 'correct_option': 'A'}, {'order_index': 30, 'question_text': "Where did Prophet Muhammad (ﷺ) deliver his historic Farewell Sermon (Khutbat al-Wada') emphasizing equality and universal human rights?", 'options': {'A': 'Plain of Arafat (Mount of Mercy)', 'B': 'Muzdalifah', 'C': 'Mina', 'D': 'Al-Masjid an-Nabawi'}, 'correct_option': 'A'}, {'order_index': 31, 'question_text': 'What is the primary foundation and first pillar upon which the structure of Islam is built?', 'options': {'A': 'The Shahadah (Declaration of Faith in Allah and His Messenger)', 'B': 'Performing daily prayers', 'C': 'Payment of Zakat', 'D': 'Fasting during Ramadan'}, 'correct_option': 'A'}, {'order_index': 32, 'question_text': 'How many obligatory (Fard) daily prayers are required of every mature and sane Muslim?', 'options': {'A': '3', 'B': '4', 'C': '5', 'D': '7'}, 'correct_option': 'C'}, {'order_index': 33, 'question_text': 'What is the ritual purification performed using clean earth or stone when clean water is unavailable or cannot be used?', 'options': {'A': 'Tayammum', 'B': 'Wudu', 'C': 'Ghusl', 'D': 'Istinja'}, 'correct_option': 'A'}, {'order_index': 34, 'question_text': 'What is the minimum qualifying amount of surplus wealth held for one lunar year before Zakat becomes obligatory called?', 'options': {'A': 'Nisab', 'B': 'Hawl', 'C': 'Fidyah', 'D': 'Kaffarah'}, 'correct_option': 'A'}, {'order_index': 35, 'question_text': 'What is the standard prescribed percentage rate for Zakat on monetary savings, gold, and commercial merchandise?', 'options': {'A': '1.0%', 'B': '2.5% (one fortieth)', 'C': '5.0%', 'D': '10.0%'}, 'correct_option': 'B'}, {'order_index': 36, 'question_text': 'What is the pre-dawn meal eaten by a fasting person before true dawn (Fajr) enters called in Sunnah?', 'options': {'A': 'Iftar', 'B': 'Suhoor', 'C': 'Walimah', 'D': 'Aqiqah'}, 'correct_option': 'B'}, {'order_index': 37, 'question_text': 'What essential pillar and rite of Hajj on the 9th of Dhul-Hijjah must be completed for the pilgrimage to be valid?', 'options': {'A': 'Standing at Arafat (Wuquf bi-Arafah)', 'B': "Tawaf al-Wada'", 'C': 'Stoning the Jamarat on the 10th only', 'D': 'Staying at Mina on the 8th'}, 'correct_option': 'A'}, {'order_index': 38, 'question_text': 'Which blessed night in Ramadan is described in the Quran as being superior in virtue to a thousand months?', 'options': {'A': 'Laylat al-Qadr (The Night of Decree)', 'B': "Laylat al-Bara'at", 'C': "Laylat al-Mi'raj", 'D': "Laylat al-Jumu'ah"}, 'correct_option': 'A'}, {'order_index': 39, 'question_text': 'What are the voluntary communal night prayers performed following Salat al-Isha during the month of Ramadan called?', 'options': {'A': 'Salat at-Tarawih', 'B': 'Salat ad-Duha', 'C': 'Salat al-Istikharah', 'D': 'Salat al-Kusuf'}, 'correct_option': 'A'}, {'order_index': 40, 'question_text': 'What is the sacred direction (Qiblah) toward which Muslims worldwide orient their physical posture during prayer?', 'options': {'A': "The Holy Ka'bah in Makkah", 'B': 'Al-Masjid an-Nabawi in Madinah', 'C': 'Al-Aqsa Mosque in Jerusalem', 'D': 'Mount Sinai'}, 'correct_option': 'A'}, {'order_index': 41, 'question_text': 'Which classical compilation of Hadith is widely regarded by Muslim scholars as the most authentic book after the Holy Quran?', 'options': {'A': 'Sahih Al-Bukhari', 'B': 'Sunan Abu Dawud', 'C': 'Sunan at-Tirmidhi', 'D': 'Sunan Ibn Majah'}, 'correct_option': 'A'}, {'order_index': 42, 'question_text': 'According to the famous opening Hadith in Sahih al-Bukhari, on what primary basis are human actions evaluated and rewarded?', 'options': {'A': 'By their underlying intentions (Niyyah)', 'B': 'By external appearance and status', 'C': 'By speed of execution', 'D': 'By social popularity'}, 'correct_option': 'A'}, {'order_index': 43, 'question_text': 'Which companion of the Prophet (ﷺ) is recorded to have preserved and narrated the greatest total number of Hadith traditions?', 'options': {'A': 'Abu Hurairah (Abd ar-Rahman ibn Sakhr)', 'B': 'Abdullah ibn Umar', 'C': 'Anas ibn Malik', 'D': 'Jabir ibn Abdullah'}, 'correct_option': 'A'}, {'order_index': 44, 'question_text': "Prophet Muhammad (ﷺ) taught the Golden Rule of fellowship: 'None of you truly believes until he loves for his brother...'", 'options': {'A': 'What he loves for himself', 'B': 'To surpass everyone else in worldly possessions', 'C': 'To never experience hardship', 'D': 'To agree with him on every personal opinion'}, 'correct_option': 'A'}, {'order_index': 45, 'question_text': "What is the term for perpetual continuous charity (such as establishing a water well or school) whose rewards continue after one's demise?", 'options': {'A': 'Sadaqah Jariyah', 'B': 'Zakat al-Fitr', 'C': 'Kaffarah', 'D': 'Nadhar'}, 'correct_option': 'A'}, {'order_index': 46, 'question_text': 'Which pioneering Muslim mathematician and astronomer is widely honored as the founding father of modern algebra?', 'options': {'A': 'Muhammad ibn Musa Al-Khwarizmi', 'B': 'Al-Battani', 'C': 'Omar Khayyam', 'D': 'Al-Biruni'}, 'correct_option': 'A'}, {'order_index': 47, 'question_text': "Which renowned Muslim physician and polymath authored 'The Canon of Medicine' (Al-Qanun fi al-Tibb), standard text in medical history?", 'options': {'A': 'Ibn Sina (Avicenna)', 'B': 'Ibn Rushd (Averroes)', 'C': 'Al-Razi (Rhazes)', 'D': 'Ibn an-Nafis'}, 'correct_option': 'A'}, {'order_index': 48, 'question_text': "Which 14th-century Muslim scholar and polymath authored the 'Muqaddimah', founding the scientific disciplines of historiography and sociology?", 'options': {'A': 'Ibn Khaldun', 'B': 'Al-Ghazali', 'C': 'Ibn Battuta', 'D': 'Al-Masudi'}, 'correct_option': 'A'}, {'order_index': 49, 'question_text': 'What core Islamic moral quality describes constant mindfulness of Allah, ethical integrity, and conscientiousness in private and public?', 'options': {'A': 'Taqwa', 'B': 'Tawakkul', 'C': 'Sabr', 'D': 'Shukr'}, 'correct_option': 'A'}, {'order_index': 50, 'question_text': 'In a well-known Hadith narrated by Ibn Majah, Prophet Muhammad (ﷺ) emphasized the nobility of learning by declaring that seeking knowledge is:', 'options': {'A': 'An obligation upon every Muslim', 'B': 'Reserved exclusively for elderly scholars', 'C': 'Permissible only during peacetime', 'D': 'Optional for those with surplus wealth'}, 'correct_option': 'A'}]
 
 
 async def seed_sample_competition(
     session: AsyncSession,
     title: str = "EMYC 2026 Youth Knowledge Challenge",
-    duration_minutes: int = 30,
+    duration_minutes: int = 120,
     status: CompetitionStatus = CompetitionStatus.LIVE,
+    questions_set: list = None,
 ) -> Competition:
+    q_list = questions_set or SAMPLE_QUESTIONS
     now = datetime.now(timezone.utc)
     competition = Competition(
         id=uuid.uuid4(),
@@ -143,12 +32,14 @@ async def seed_sample_competition(
         opens_at=now - timedelta(minutes=5),
         closes_at=now + timedelta(days=7),
         duration_minutes=duration_minutes,
-        question_count=len(SAMPLE_QUESTIONS),
+        question_count=len(q_list),
+        actual_exam_started_at=now if status == CompetitionStatus.LIVE else None,
+        actual_exam_ends_at=(now + timedelta(days=7)) if status == CompetitionStatus.LIVE else None,
     )
     session.add(competition)
     await session.flush()
 
-    for idx, q_data in enumerate(SAMPLE_QUESTIONS, start=1):
+    for idx, q_data in enumerate(q_list, start=1):
         q = CompetitionQuestion(
             id=uuid.uuid4(),
             competition_id=competition.id,

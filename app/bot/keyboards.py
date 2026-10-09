@@ -366,7 +366,12 @@ def get_admin_create_comp_questions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "⚡ Attach EMYC Standard Questions", callback_data="admin:create_q:standard"
+                "🌟 Attach 50 EMYC Official Questions", callback_data="admin:create_q:official50"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "⚡ Attach 20 EMYC Standard Questions", callback_data="admin:create_q:standard"
             )
         ],
         [

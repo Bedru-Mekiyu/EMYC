@@ -37,7 +37,7 @@ from app.bot.keyboards import (
     get_admin_question_preview_keyboard,
     get_admin_question_list_keyboard,
 )
-from app.scripts.seed_questions import SAMPLE_QUESTIONS
+from app.scripts.seed_questions import SAMPLE_QUESTIONS, OFFICIAL_50_QUESTIONS
 
 settings = get_settings()
 
@@ -426,6 +426,7 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
         # Simplified state-aware buttons (questions managed in Supabase, auto-attached when starting LIVE)
         if comp.status == CompetitionStatus.DRAFT:
             if existing_q_count == 0 and comp.question_count == 0:
+                buttons.append([InlineKeyboardButton("🌟 Attach 50 EMYC Official Questions", callback_data=f"admin:attach_50:{comp.id}")])
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
             else:
                 buttons.append([InlineKeyboardButton("🚀 Open for Registration (Phase 1)", callback_data=f"admin:set_open:{comp.id}")])
@@ -436,6 +437,7 @@ async def cb_admin_competition(update: Update, context: ContextTypes.DEFAULT_TYP
 
         elif comp.status in [CompetitionStatus.SCHEDULED, CompetitionStatus.OPEN]:
             if existing_q_count == 0 and comp.question_count == 0:
+                buttons.append([InlineKeyboardButton("🌟 Attach 50 EMYC Official Questions", callback_data=f"admin:attach_50:{comp.id}")])
                 buttons.append([InlineKeyboardButton("⚡ Attach 20 EMYC Standard Questions", callback_data=f"admin:attach_std:{comp.id}")])
             else:
                 buttons.append([InlineKeyboardButton("▶️ Start Competition (Set LIVE)", callback_data=f"admin:set_live:{comp.id}")])
@@ -601,6 +603,38 @@ async def cb_admin_apply_schedule(update: Update, context: ContextTypes.DEFAULT_
                 await db.commit()
 
     await query.answer("Schedule updated successfully!", show_alert=False)
+    await cb_admin_competition(update, context)
+
+
+@require_admin
+async def cb_admin_attach_50_questions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Attaches official 50-question set to a competition in 1 click."""
+    query = update.callback_query
+    await query.answer("Attaching 50 official questions...", show_alert=False)
+    comp_id = uuid.UUID(query.data.split(":")[2])
+
+    async with AsyncSessionLocal() as db:
+        comp = await db.get(Competition, comp_id)
+        if not comp or comp.status not in [CompetitionStatus.DRAFT, CompetitionStatus.SCHEDULED]:
+            await query.answer("Cannot add questions to active or closed competition.", show_alert=True)
+            return
+
+        cnt_stmt = select(func.count(CompetitionQuestion.id)).where(CompetitionQuestion.competition_id == comp.id)
+        start_idx = ((await db.execute(cnt_stmt)).scalar() or 0) + 1
+
+        for offset, q_data in enumerate(OFFICIAL_50_QUESTIONS):
+            q = CompetitionQuestion(
+                competition_id=comp.id,
+                question_text=q_data["question_text"],
+                options=q_data["options"],
+                correct_option=q_data["correct_option"],
+                order_index=start_idx + offset,
+            )
+            db.add(q)
+        comp.question_count = (start_idx - 1) + len(OFFICIAL_50_QUESTIONS)
+        await db.commit()
+
+    # Refresh competition controls view
     await cb_admin_competition(update, context)
 
 
@@ -1495,7 +1529,12 @@ async def cb_admin_create_questions(update: Update, context: ContextTypes.DEFAUL
     opens_at = wizard.get("opens_at", datetime.now(timezone.utc))
     closes_at = wizard.get("closes_at", opens_at + timedelta(days=7))
 
-    questions_to_add = SAMPLE_QUESTIONS if q_mode == "standard" else []
+    if q_mode == "official50":
+        questions_to_add = OFFICIAL_50_QUESTIONS
+    elif q_mode == "standard":
+        questions_to_add = SAMPLE_QUESTIONS
+    else:
+        questions_to_add = []
 
     async with AsyncSessionLocal() as db:
         comp = await CompetitionService.create_competition(
