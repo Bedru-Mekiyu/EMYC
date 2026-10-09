@@ -54,8 +54,3 @@ resource "aws_lb_listener" "http" {
     target_group_arn = aws_lb_target_group.app.arn
   }
 }
-
-output "alb_dns_name" {
-  description = "Public DNS hostname of the staging Application Load Balancer"
-  value       = aws_lb.staging.dns_name
-}
