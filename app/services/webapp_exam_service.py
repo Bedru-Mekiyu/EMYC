@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 
 from sqlalchemy import select, and_, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.time_utils import now_utc, ensure_utc
 from app.core.logging import logger, log_audit_event
@@ -331,12 +331,15 @@ class WebAppExamService:
 
         stmt = (
             select(ExamAttempt)
-            .options(selectinload(ExamAttempt.participant), selectinload(ExamAttempt.competition))
+            .options(
+                joinedload(ExamAttempt.participant),
+                joinedload(ExamAttempt.competition),
+            )
             .where(ExamAttempt.id == attempt_id)
-            .with_for_update()
+            .with_for_update(of=ExamAttempt)
         )
         res = await db.execute(stmt)
-        attempt = res.scalar_one_or_none()
+        attempt = res.unique().scalar_one_or_none()
         if not attempt:
             raise CompetitionError("Attempt not found")
 
