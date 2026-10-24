@@ -32,6 +32,9 @@ htmlcov/
 .env
 .env.local
 *.log
+*key*.json
+*credentials*.json
+gcp-key.json
 
 # IDE
 .idea/
